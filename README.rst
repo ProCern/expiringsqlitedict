@@ -1,6 +1,6 @@
-=================================================================
-sqlitedict -- persistent ``dict``, backed-up by SQLite and pickle
-=================================================================
+=========================================================================
+expiringsqlitedict -- persistent ``dict``, backed-up by SQLite and pickle
+=========================================================================
 
 |Travis|_
 |License|_
@@ -13,7 +13,7 @@ sqlitedict -- persistent ``dict``, backed-up by SQLite and pickle
 .. _License: https://pypi.python.org/pypi/sqlitedict
 
 A lightweight wrapper around Python's sqlite3 database with a simple, Pythonic
-dict-like interface and support for multi-thread access:
+dict-like interface and support for multi-thread access.  This fork is modified to implement a metatable and automatic expiring and vacuuming semantics, as well as some appropriate locking.
 
 .. code-block:: python
 
@@ -77,7 +77,7 @@ Features
 Installation
 ------------
 
-The module has no dependencies beyond Python itself. The minimum Python version is 2.5, continuously tested on Python 2.6, 2.7, 3.3 and 3.4 `on Travis <https://travis-ci.org/RaRe-Technologies/sqlitedict>`_.
+The module has no dependencies beyond Python itself and the ``six`` single-file module. The minimum Python version is 2.5, continuously tested on Python 2.6, 2.7, 3.3 and 3.4 `on Travis <https://travis-ci.org/RaRe-Technologies/sqlitedict>`_.
 
 Install or upgrade with::
 
@@ -131,11 +131,11 @@ To perform all tests with coverage::
 Comments, bug reports
 ---------------------
 
-``sqlitedict`` resides on `github <https://github.com/RaRe-Technologies/sqlitedict>`_. You can file
+``sqlitedict`` resides on `github <https://github.com/absperf/expiringsqlitedict>`_. You can file
 issues or pull requests there.
 
 
 ----
 
 ``sqlitedict`` is open source software released under the `Apache 2.0 license <http://opensource.org/licenses/apache2.0.php>`_.
-Copyright (c) 2011-now `Radim Řehůřek <http://radimrehurek.com>`_ and contributors.
+Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and contributors.  The changes in this fork copyright (c) 2018 Absolute Performance, Inc.

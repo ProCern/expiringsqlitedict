@@ -45,8 +45,8 @@ SetupDevelop.__doc__ = setuptools.command.develop.develop.__doc__
 
 
 setup(
-    name='sqlitedict',
-    version='1.5.0',
+    name='expiringsqlitedict',
+    version='1.0.0',
     description='Persistent dict in Python, backed up by sqlite3 and pickle, multithread-safe.',
     long_description=read('README.rst'),
 
@@ -59,10 +59,10 @@ setup(
     maintainer='Radim Rehurek',
     maintainer_email='me@radimrehurek.com',
 
-    url='https://github.com/piskvorky/sqlitedict',
-    download_url='http://pypi.python.org/pypi/sqlitedict',
+    url='https://github.com/absperf/expiringsqlitedict',
+    download_url='http://pypi.python.org/pypi/expiringsqlitedict',
 
-    keywords='sqlite, persistent dict, multithreaded',
+    keywords='sqlite, persistent dict',
 
     license='Apache 2.0',
     platforms='any',

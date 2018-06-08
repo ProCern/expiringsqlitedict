@@ -47,17 +47,17 @@ SetupDevelop.__doc__ = setuptools.command.develop.develop.__doc__
 setup(
     name='expiringsqlitedict',
     version='1.0.0',
-    description='Persistent dict in Python, backed up by sqlite3 and pickle, multithread-safe.',
+    description='Persistent dict in Python, backed up by sqlite3 and pickle',
     long_description=read('README.rst'),
 
-    py_modules=['sqlitedict'],
+    py_modules=['expiringsqlitedict'],
 
     # there is a bug in python2.5, preventing distutils from using any non-ascii characters :(
     # http://bugs.python.org/issue2562
-    author='Radim Rehurek, Victor R. Escobar, Andrey Usov, Prasanna Swaminathan, Jeff Quast',
+    author='Radim Rehurek, Victor R. Escobar, Andrey Usov, Prasanna Swaminathan, Jeff Quast, Taylor C. Richberger',
     author_email="various",
-    maintainer='Radim Rehurek',
-    maintainer_email='me@radimrehurek.com',
+    maintainer='Taylor C. Richberger',
+    maintainer_email='tcr@absolute-performance.com',
 
     url='https://github.com/absperf/expiringsqlitedict',
     download_url='http://pypi.python.org/pypi/expiringsqlitedict',

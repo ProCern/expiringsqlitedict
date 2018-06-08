@@ -8,7 +8,7 @@ class SqliteDict_cPickleImportTest(TestCaseBackport):
     """Verify fallback to 'pickle' module when 'cPickle' is not found."""
     def setUp(self):
         self.orig_meta_path = sys.meta_path
-        self.orig_sqlitedict = orig_sqlitedict = sys.modules.pop('sqlitedict', None)
+        self.orig_sqlitedict = orig_sqlitedict = sys.modules.pop('expiringsqlitedict', None)
 
         class FauxMissingImport(object):
             def __init__(self, *args):
@@ -32,14 +32,13 @@ class SqliteDict_cPickleImportTest(TestCaseBackport):
     def tearDown(self):
         sys.meta_path = self.orig_meta_path
         if self.orig_sqlitedict:
-            sys.modules['sqlitedict'] = self.orig_sqlitedict
+            sys.modules['expiringsqlitedict'] = self.orig_sqlitedict
 
     def test_cpickle_fallback_to_pickle(self):
         # exercise,
-        sqlitedict = __import__("sqlitedict")
+        sqlitedict = __import__("expiringsqlitedict")
         # verify,
         self.assertIn('pickle', sys.modules.keys())
-        self.assertIs(sqlitedict.dumps, sys.modules['pickle'].dumps)
 
 
 class SqliteDictPython24Test(TestCaseBackport):
@@ -48,14 +47,14 @@ class SqliteDictPython24Test(TestCaseBackport):
         # manually monkeypatch sys.version_info
         self._orig_version_info = sys.version_info
         sys.version_info = (2, 4, 0, 'does-not-matter', 0)
-        self.orig_sqlitedict = sys.modules.pop('sqlitedict', None)
+        self.orig_sqlitedict = sys.modules.pop('expiringsqlitedict', None)
 
     def tearDown(self):
         # remove our monkeypatch
         sys.version_info = self._orig_version_info
         if self.orig_sqlitedict:
-            sys.modules['sqlitedict'] = self.orig_sqlitedict
+            sys.modules['expiringsqlitedict'] = self.orig_sqlitedict
 
     def test_py24_error(self):
         with self.assertRaises(ImportError):
-            __import__("sqlitedict")
+            __import__("expiringsqlitedict")

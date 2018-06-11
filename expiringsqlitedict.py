@@ -195,23 +195,29 @@ class SqliteDict(DictClass):
     def clean(self):
         '''Clean up expired columns'''
 
-        self.execute(
+        if self.flag == 'r':
+            raise RuntimeError('Refusing to clean SqliteDict')
+
+        self._execute(
             "DELETE FROM expiringsqlitedict WHERE expire<=STRFTIME('%s', 'now', 'utc')"
             )
 
     def check_vacuum(self):
         '''Tests to see if it's time to vacuum, and vacuums if so'''
+        if self.flag == 'r':
+            raise RuntimeError('Refusing to vacuum SqliteDict')
+
         cur = self.conn.cursor()
-        cur.execute(
+        cur._execute(
             "SELECT value FROM expiringsqlitedictmeta WHERE key=?",
             ('nextvacuum',),
             )
         nextvacuum = datetime.fromtimestamp(float(cur.fetchone()[0]))
         if datetime.utcnow() >= nextvacuum:
             logger.info("vacuuming Sqlite file {}".format(self.filename))
-            self.conn.execute('VACUUM')
+            self.conn._execute('VACUUM')
             cur = self.conn.cursor()
-            cur.execute(
+            cur._execute(
                 'REPLACE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',
                 ('nextvacuum', (datetime.utcnow() + self.vacuuminterval).timestamp()),
             )
@@ -225,26 +231,28 @@ class SqliteDict(DictClass):
                 os.remove(self.filename)
         logger.info("opening Sqlite file {}".format(self.filename))
         self.conn = sqlite3.connect(self.filename).__enter__()
-        self.execute('''
+        self._execute('''
         CREATE TABLE IF NOT EXISTS expiringsqlitedict (
             key TEXT UNIQUE NOT NULL,
             expire INTEGER NOT NULL,
             value BLOB NOT NULL)
         ''')
-        self.execute('CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON expiringsqlitedict (expire)')
-        self.execute('''
+        self._execute('CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON expiringsqlitedict (expire)')
+        self._execute('''
         CREATE TABLE IF NOT EXISTS expiringsqlitedictmeta (
             key TEXT UNIQUE NOT NULL,
             value TEXT NOT NULL)
         ''')
-        self.execute(
+        self._execute(
             'INSERT OR IGNORE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',
             ('nextvacuum', (datetime.utcnow() + self.vacuuminterval).timestamp())
         )
         if self.flag == 'w':
             self.clear()
-        self.clean()
-        self.check_vacuum()
+
+        if self.flag != 'r':
+            self.clean()
+            self.check_vacuum()
         return self
 
     def __exit__(self, *exc_info):
@@ -267,20 +275,23 @@ class SqliteDict(DictClass):
         # We could keep the total count of rows ourselves, by means of triggers,
         # but that seems too complicated and would slow down normal operation
         # (insert/delete etc).
-        rows = self.select_one('SELECT COUNT(*) FROM expiringsqlitedict')[0]
+        rows = self._select_one('SELECT COUNT(*) FROM expiringsqlitedict')[0]
         return rows if rows is not None else 0
 
-    def select_one(self, *args, **kwargs):
-        '''Runs an execute and a fetchone'''
+    def _select_one(self, *args, **kwargs):
+        '''Runs an execute and a fetchone.
+        
+        Used internally to simplify context manager logic.
+        '''
         if self.connection_opened():
             cur = self.conn.cursor()
             cur.execute(*args, **kwargs)
             return cur.fetchone()
         else:
             with self:
-                return self.select_one(*args, **kwargs)
+                return self._select_one(*args, **kwargs)
 
-    def select(self, *args, **kwargs):
+    def _select(self, *args, **kwargs):
         '''Runs an execute and a select, iterating a cursor.
 
         This is a generator instead of returning a cursor, because returning a
@@ -295,52 +306,52 @@ class SqliteDict(DictClass):
                 yield row
         else:
             with self:
-                for row in self.select(*args, **kwargs):
+                for row in self._select(*args, **kwargs):
                     yield row
 
-    def execute(self, *args, **kwargs):
+    def _execute(self, *args, **kwargs):
         '''Runs an execute that ignores results.
 
-        Only necessary to simplify lockfile management.
+        Used internally to simplify context manager logic.
         '''
 
         if self.connection_opened():
             self.conn.execute(*args, **kwargs)
         else:
             with self:
-                self.execute(*args, **kwargs)
+                self._execute(*args, **kwargs)
 
-    def executemany(self, *args, **kwargs):
+    def _executemany(self, *args, **kwargs):
         '''Runs an executemany that ignores results.
 
-        Only necessary to simplify lockfile management.
+        Used internally to simplify context manager logic.
         '''
 
         if self.connection_opened():
             self.conn.executemany(*args, **kwargs)
         else:
             with self:
-                self.executemany(*args, **kwargs)
+                self._executemany(*args, **kwargs)
 
     def __bool__(self):
         # No elements is False, otherwise True
-        m = self.select_one('SELECT MAX(ROWID) FROM expiringsqlitedict')[0]
+        m = self._select_one('SELECT MAX(ROWID) FROM expiringsqlitedict')[0]
         # Explicit better than implicit and bla bla
         return True if m is not None else False
 
     def iterkeys(self):
         sql = 'SELECT key FROM expiringsqlitedict ORDER BY rowid'
-        for (key,) in self.select(sql):
+        for (key,) in self._select(sql):
             yield key
 
     def itervalues(self):
         sql = 'SELECT value FROM expiringsqlitedict ORDER BY rowid'
-        for (value,) in self.select(sql):
+        for (value,) in self._select(sql):
             yield self.decode(value)
 
     def iteritems(self):
         sql = 'SELECT key, value FROM expiringsqlitedict ORDER BY rowid'
-        for key, value in self.select(sql):
+        for key, value in self._select(sql):
             yield key, self.decode(value)
 
     def keys(self):
@@ -353,10 +364,10 @@ class SqliteDict(DictClass):
         return self.iteritems() if major_version > 2 else list(self.iteritems())
 
     def __contains__(self, key):
-        return self.select_one('SELECT 1 FROM expiringsqlitedict WHERE key = ?', (key,)) is not None
+        return self._select_one('SELECT 1 FROM expiringsqlitedict WHERE key = ?', (key,)) is not None
 
     def __getitem__(self, key):
-        item = self.select_one('SELECT value FROM expiringsqlitedict WHERE key = ?', (key,))
+        item = self._select_one('SELECT value FROM expiringsqlitedict WHERE key = ?', (key,))
         if item is None:
             raise KeyError(key)
         return self.decode(item[0])
@@ -367,7 +378,7 @@ class SqliteDict(DictClass):
 
         expire = int((datetime.utcnow() + self.lifespan).timestamp())
 
-        self.execute(
+        self._execute(
             'REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, ?, ?)',
             (key, expire, self.encode(value)),
             )
@@ -378,7 +389,7 @@ class SqliteDict(DictClass):
 
         if key not in self:
             raise KeyError(key)
-        self.execute('DELETE FROM expiringsqlitedict WHERE key=?', (key,))
+        self._execute('DELETE FROM expiringsqlitedict WHERE key=?', (key,))
 
     def update(self, items=(), **kwds):
         if self.flag == 'r':
@@ -397,7 +408,7 @@ class SqliteDict(DictClass):
         items += [(k, self.encode(v)) for k, v in kwds]
 
         if items:
-            self.executemany(self.ADD_ITEM, items)
+            self._executemany(self.ADD_ITEM, items)
 
     __iter__ = iterkeys
 
@@ -406,7 +417,7 @@ class SqliteDict(DictClass):
             raise RuntimeError('Refusing to clear read-only SqliteDict')
 
         self.commit()
-        self.execute('DELETE FROM expiringsqlitedict')
+        self._execute('DELETE FROM expiringsqlitedict')
         self.commit()
 
     def commit(self, blocking=True):

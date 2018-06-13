@@ -214,14 +214,14 @@ class SqliteDict(DictClass):
             raise RuntimeError('Refusing to vacuum SqliteDict')
 
         cur = self.conn.cursor()
-        cur._execute(
+        cur.execute(
             "SELECT value FROM expiringsqlitedictmeta WHERE key=?",
             ('nextvacuum',),
             )
         nextvacuum = datetime.fromtimestamp(float(cur.fetchone()[0]))
         if datetime.utcnow() >= nextvacuum:
             logger.info("vacuuming Sqlite file {}".format(self.filename))
-            self.conn._execute('VACUUM')
+            self.conn.execute('VACUUM')
             cur = self.conn.cursor()
             cur._execute(
                 'REPLACE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',

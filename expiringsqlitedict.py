@@ -86,7 +86,6 @@ def encode(obj):
 
     return sqlite3.Binary(data)
 
-
 def decode(obj):
     """Deserialize objects retrieved from SQLite."""
     data = bytes(obj)
@@ -99,6 +98,13 @@ def decode(obj):
         pickled = data
 
     return pickle.loads(pickled)
+
+def totimestamp(dt):
+    if major_version > 2:
+        return dt.timestamp()
+    else:
+        return (dt - datetime(1970, 1, 1)).total_seconds()
+    
 
 class SqliteDict(DictClass):
     VALID_FLAGS = ['c', 'r', 'w', 'n']
@@ -219,7 +225,7 @@ class SqliteDict(DictClass):
             cur = self.conn.cursor()
             cur._execute(
                 'REPLACE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',
-                ('nextvacuum', (datetime.utcnow() + self.vacuuminterval).timestamp()),
+                ('nextvacuum', totimestamp(datetime.utcnow() + self.vacuuminterval)),
             )
             # Force a commit so that we're sure vacuum time is updated
             self.conn.commit()
@@ -245,7 +251,7 @@ class SqliteDict(DictClass):
         ''')
         self._execute(
             'INSERT OR IGNORE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',
-            ('nextvacuum', (datetime.utcnow() + self.vacuuminterval).timestamp())
+            ('nextvacuum', totimestamp(datetime.utcnow() + self.vacuuminterval)),
         )
         if self.flag == 'w':
             self.clear()
@@ -376,7 +382,7 @@ class SqliteDict(DictClass):
         if self.flag == 'r':
             raise RuntimeError('Refusing to write to read-only SqliteDict')
 
-        expire = int((datetime.utcnow() + self.lifespan).timestamp())
+        expire = int(totimestamp(datetime.utcnow() + self.lifespan))
 
         self._execute(
             'REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, ?, ?)',

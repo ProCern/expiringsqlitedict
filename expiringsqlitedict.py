@@ -57,11 +57,7 @@ except ImportError:
     from pickle import HIGHEST_PROTOCOL as PICKLE_PROTOCOL
     import pickle
 
-# some Python 3 vs 2 imports
-try:
-    from collections import UserDict as DictClass
-except ImportError:
-    from UserDict import DictMixin as DictClass
+from collections import MutableMapping
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +102,7 @@ def totimestamp(dt):
         return (dt - datetime(1970, 1, 1)).total_seconds()
     
 
-class SqliteDict(DictClass):
+class SqliteDict(MutableMapping):
     VALID_FLAGS = ['c', 'r', 'w', 'n']
 
     def __init__(self, filename, flag='c', encode=encode, decode=decode, lifespan=None, vacuuminterval=None):

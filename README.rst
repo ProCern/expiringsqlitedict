@@ -106,12 +106,14 @@ To perform all tests with coverage::
 Comments, bug reports
 ---------------------
 
-``expiringsqlitedict`` resides on `github
-<https://github.com/absperf/expiringsqlitedict>`_. You can file issues or pull
+``expiringsqlitedict`` resides on `github <https://github.com/absperf/expiringsqlitedict>`_. You can file issues or pull
 requests there.
 
 
 ----
 
-``expiringsqlitedict`` is open source software released under the `Apache 2.0 license <http://opensource.org/licenses/apache2.0.php>`_.
-Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and contributors.  The changes in this fork copyright (c) 2018 Absolute Performance, Inc.
+``expiringsqlitedict`` is open source software released under the
+`Apache 2.0 license <http://opensource.org/licenses/apache2.0.php>`_.
+Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and
+contributors.  The changes in this fork copyright (c) 2018 Absolute Performance,
+Inc.

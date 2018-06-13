@@ -1,7 +1,0 @@
-include README.rst
-include setup.py
-include sqlitedict.py
-include Makefile
-include LICENSE.apache
-include LICENSE.rst
-recursive-include tests *

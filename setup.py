@@ -55,7 +55,7 @@ setup(
     # there is a bug in python2.5, preventing distutils from using any non-ascii characters :(
     # http://bugs.python.org/issue2562
     author='Radim Rehurek, Victor R. Escobar, Andrey Usov, Prasanna Swaminathan, Jeff Quast, Taylor C. Richberger',
-    author_email="various",
+    author_email="tcr@absolute-performance.com",
     maintainer='Taylor C. Richberger',
     maintainer_email='tcr@absolute-performance.com',
 

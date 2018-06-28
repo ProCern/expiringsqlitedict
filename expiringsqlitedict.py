@@ -186,6 +186,11 @@ class SqliteDict(MutableMapping):
         else:
             lock_type = LOCK_EX
 
+        # First touch to make sure the lockfile exists.  This is necessary if
+        # the file is opened for reading before it's opened for writing.
+        with _open(self.lockfilename, 'a'):
+            pass
+
         self.lockfile = _open(self.lockfilename, self.lock_mode)
         lockf(self.lockfile, lock_type)
 

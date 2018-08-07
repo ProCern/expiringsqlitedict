@@ -214,17 +214,15 @@ class SqliteDict(MutableMapping):
         if self.flag == 'r':
             raise RuntimeError('Refusing to vacuum SqliteDict')
 
-        cur = self.conn.cursor()
-        cur.execute(
+        self.conn.cursor().execute(
             "SELECT value FROM expiringsqlitedictmeta WHERE key=?",
             ('nextvacuum',),
-            )
+        )
         nextvacuum = datetime.fromtimestamp(float(cur.fetchone()[0]))
         if datetime.utcnow() >= nextvacuum:
             logger.info("vacuuming Sqlite file {}".format(self.filename))
-            self.conn.execute('VACUUM')
-            cur = self.conn.cursor()
-            cur._execute(
+            self.conn.cursor().execute('VACUUM')
+            self.conn.cursor().execute(
                 'REPLACE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',
                 ('nextvacuum', totimestamp(datetime.utcnow() + self.vacuuminterval)),
             )

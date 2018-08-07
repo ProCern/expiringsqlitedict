@@ -214,7 +214,8 @@ class SqliteDict(MutableMapping):
         if self.flag == 'r':
             raise RuntimeError('Refusing to vacuum SqliteDict')
 
-        self.conn.cursor().execute(
+        cur = self.conn.cursor()
+        cur.execute(
             "SELECT value FROM expiringsqlitedictmeta WHERE key=?",
             ('nextvacuum',),
         )

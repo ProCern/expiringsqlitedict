@@ -17,7 +17,7 @@ import io
 import subprocess
 
 import setuptools.command.develop
-from distutils.core import setup
+from setuptools import setup
 
 
 def read(fname):
@@ -46,7 +46,7 @@ SetupDevelop.__doc__ = setuptools.command.develop.develop.__doc__
 
 setup(
     name='expiringsqlitedict',
-    version='1.2.2',
+    version='1.2.3',
     description='Persistent compressed expiring dict in Python, backed up by sqlite3 and pickle, with auto-cleaning and auto-vacuuming semantics',
     long_description=read('README.rst'),
 

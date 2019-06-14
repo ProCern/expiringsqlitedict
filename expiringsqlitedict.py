@@ -222,7 +222,9 @@ class SqliteDict(MutableMapping):
         nextvacuum = datetime.fromtimestamp(float(cur.fetchone()[0]))
         if datetime.utcnow() >= nextvacuum:
             logger.info("vacuuming Sqlite file {}".format(self.filename))
+            self.conn.isolation_level = None
             self.conn.cursor().execute('VACUUM')
+            self.conn.isolation_level = ''
             self.conn.cursor().execute(
                 'REPLACE INTO expiringsqlitedictmeta (key, value) VALUES (?, ?)',
                 ('nextvacuum', totimestamp(datetime.utcnow() + self.vacuuminterval)),

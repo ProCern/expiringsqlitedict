@@ -46,7 +46,7 @@ SetupDevelop.__doc__ = setuptools.command.develop.develop.__doc__
 
 setup(
     name='expiringsqlitedict',
-    version='1.2.3',
+    version='1.2.4',
     description='Persistent compressed expiring dict in Python, backed up by sqlite3 and pickle, with auto-cleaning and auto-vacuuming semantics',
     long_description=read('README.rst'),
 

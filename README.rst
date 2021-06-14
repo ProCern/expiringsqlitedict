@@ -1,8 +1,6 @@
 expiringsqlitedict -- expiring file-backed ``dict``
 ===================================================
 
-|License|_
-
 .. _Downloads: https://pypi.python.org/pypi/expiringsqlitedict
 .. _License: https://pypi.python.org/pypi/expiringsqlitedict
 

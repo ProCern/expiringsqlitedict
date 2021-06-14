@@ -1,6 +1,5 @@
-=========================================================================
-expiringsqlitedict -- persistent ``dict``, backed-up by SQLite and pickle
-=========================================================================
+expiringsqlitedict -- expiring file-backed ``dict``
+===================================================
 
 |License|_
 
@@ -8,44 +7,64 @@ expiringsqlitedict -- persistent ``dict``, backed-up by SQLite and pickle
 .. _License: https://pypi.python.org/pypi/expiringsqlitedict
 
 A lightweight wrapper around Python's sqlite3 database with a simple, Pythonic
-dict-like interface.  This fork is modified to implement a metatable and
-automatic expiring and vacuuming semantics, as well as some appropriate locking.
-This also compresses values automatically.
+dict-like interface.
 
 .. code-block:: python
 
   >>> from expiringsqlitedict import SqliteDict
-  >>> with SqliteDict('./my_db.sqlite', autocommit=True) as mydict:
+  >>> with SqliteDict('./my_db.sqlite') as mydict:
   >>>     mydict['some_key'] = any_picklable_object
   >>>     print mydict['some_key']  # prints the new value
   >>>     for key, value in mydict.iteritems():
   >>>         print key, value
   >>>     print len(mydict) # etc... all dict functions work
 
-Pickle is used internally to (de)serialize the values. Keys are arbitrary strings,
-values arbitrary pickle-able objects.  This must be used within a context
-manager.
+Pickle is used internally by default to serialize the values, and zlib is used
+to optionally compress (on insertion, the value is compressed, and it's stored
+compressed if the compressed value is smaller than uncompressed). Keys are
+arbitrary strings, values arbitrary pickle-able objects.  This must be used
+within a context manager, and serialization can be overridden with your own.
+The database is wrapped with a transaction, and any exception thrown out of the
+context manager rolls back all changes.
+
+This was forked off of `sqlitedict <https://github.com/RaRe-Technologies/sqlitedict>`_
+in order to add auto-expiring functionality, and initially was quite similar to
+it.  Version 2.0 splits of completely and takes the module into a complete
+rewrite, mostly to remove unnecesary Ptyhon 2 compatibility, simplify the API,
+completely enforce a context manager for typical cases, add full typing
+throughout, and use sqlite triggers for expiration cleanup.
+
+This version also does not vacuum at all automatically.  It did in previous
+versions, but this was kind of a silly behavior to put into the library itself.
+If you want your database file intermittently vacuumed, you should put such
+behavior into a crontab or use the ``sqlite3`` module to do it yourself
+intermittently.
 
 Features
 --------
 
-* Values can be **any picklable objects** (uses ``cPickle`` with the highest protocol).
-* Support for **access from multiple programs or threads**, using a lockfile.
-* Support for **custom serialization or compression**:
+* Values can be any picklable objects
+* Support for access from multiple programs or threads, with locking fully
+  managed by sqlite itself.
+* A very simple codebase that is easy to read, relying on sqlite for as much
+  behavior as possible.
+* A simple autocommit wrapper (``AutocommitSqliteDict``), if you really can't
+  handle a context manager and need something that fully handles like a dict.
+* Support for custom serialization or compression:
 
   .. code-block:: python
 
-      # use JSON instead of pickle
-      >>> import json
-      >>> mydict = SqliteDict('./my_db.sqlite', encode=json.dumps, decode=json.loads)
-
-      # apply zlib compression after pickling
-      >>> import zlib, pickle, sqlite3
-      >>> def my_encode(obj):
-      ...     return sqlite3.Binary(zlib.compress(pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)))
-      >>> def my_decode(obj):
-      ...     return pickle.loads(zlib.decompress(bytes(obj)))
-      >>> mydict = SqliteDict('./my_db.sqlite', encode=my_encode, decode=my_decode)
+    class JsonSerializer:
+        @staticmethod
+        def loads(data: sqlite3.Binary) -> Any:
+            return json.loads(data)
+        @staticmethod
+        def dumps(value: Any) -> sqlite3.Binary:
+            json.dumps(data)
+    
+    with SqliteDict('some.db', serializer=JsonSerializer()) as mydict:
+        mydict['some_key'] = some_json_encodable_object
+        print mydict['some_key']
 
 
 Installation
@@ -61,6 +80,9 @@ or from the `source tar.gz <http://pypi.python.org/pypi/expiringsqlitedict>`_::
 
     python setup.py install
 
+This module is a single file, so you could also easily import the module in your
+own tree, if your workflow needs that.
+
 Documentation
 -------------
 
@@ -70,21 +92,6 @@ Standard Python document strings are inside the module:
 
   >>> import expiringsqlitedict
   >>> help(expiringsqlitedict)
-
-(but it's just ``dict`` with a commit, really).
-
-**Beware**: because of Python semantics, ``expiringsqlitedict`` cannot know when
-a mutable SqliteDict-backed entry was modified in RAM. For example,
-``mydict.setdefault('new_key', []).append(1)`` will leave ``mydict['new_key']``
-equal to empty list, not ``[1]``. You'll need to explicitly assign the mutated
-object back to SqliteDict to achieve the same effect:
-
-.. code-block:: python
-
-  >>> val = mydict.get('new_key', [])
-  >>> val.append(1)  # sqlite DB not updated here!
-  >>> mydict['new_key'] = val  # now updated
-
 
 For developers
 --------------

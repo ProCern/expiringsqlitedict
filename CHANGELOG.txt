@@ -1,5 +1,8 @@
 Changes
 =======
+2.0.0, 2021-06-14
+* Completely rewrite module to rely on sqlite3 internals as much as possible.
+
 1.5.0, 13/02/2017
 * Add encode and decode parameters to store json, compressed or pickled objects (@erosennin, #65)
 * Python 3.6 fix: commit before turning off synchronous (@bit, #59)

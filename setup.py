@@ -6,55 +6,21 @@
 #
 # http://opensource.org/licenses/apache2.0.php
 
-"""
-Run with:
-
-python ./setup.py install
-"""
-
-import os
-import io
-import subprocess
-
-import setuptools.command.develop
+from pathlib import Path
 from setuptools import setup
 
-
-def read(fname):
-    path = os.path.join(os.path.dirname(__file__), fname)
-    return io.open(path, encoding='utf8').read()
-
-
-class SetupDevelop(setuptools.command.develop.develop):
-    """Docstring is overwritten."""
-
-    def run(self):
-        """
-        Prepare environment for development.
-
-        - Ensures 'nose' and 'coverage.py' are installed for testing.
-        - Call super()'s run method.
-        """
-        subprocess.check_call(('pip', 'install', 'nose', 'coverage'))
-
-        # Call super() (except develop is an old-style class, so we must call
-        # directly). The effect is that the development egg-link is installed.
-        setuptools.command.develop.develop.run(self)
-
-SetupDevelop.__doc__ = setuptools.command.develop.develop.__doc__
-
+with (Path(__file__).parent / 'README.md').open() as file:
+    readme = file.read()
 
 setup(
     name='expiringsqlitedict',
-    version='1.2.4',
-    description='Persistent compressed expiring dict in Python, backed up by sqlite3 and pickle, with auto-cleaning and auto-vacuuming semantics',
-    long_description=read('README.rst'),
+    version='2.0.0',
+    description='Persistent compressed expiring dict in Python, backed up by sqlite3 and pickle',
+    long_description=readme,
 
     py_modules=['expiringsqlitedict'],
 
-    # there is a bug in python2.5, preventing distutils from using any non-ascii characters :(
-    # http://bugs.python.org/issue2562
-    author='Radim Rehurek, Victor R. Escobar, Andrey Usov, Prasanna Swaminathan, Jeff Quast, Taylor C. Richberger',
+    author='Taylor C. Richberger',
     author_email="tcr@absolute-performance.com",
     maintainer='Taylor C. Richberger',
     maintainer_email='tcr@absolute-performance.com',
@@ -73,13 +39,7 @@ setup(
         'Intended Audience :: Developers',
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: OS Independent',
-        'Programming Language :: Python :: 2.5',
-        'Programming Language :: Python :: 2.6',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3.3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
         'Topic :: Database :: Front-Ends',
     ],
-    cmdclass={'develop': SetupDevelop},
 )

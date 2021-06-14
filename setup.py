@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # This code is distributed under the terms and conditions
@@ -9,7 +9,7 @@
 from pathlib import Path
 from setuptools import setup
 
-with (Path(__file__).parent / 'README.md').open() as file:
+with (Path(__file__).parent / 'README.rst').open() as file:
     readme = file.read()
 
 setup(

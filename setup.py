@@ -14,7 +14,7 @@ with (Path(__file__).parent / 'README.rst').open() as file:
 
 setup(
     name='expiringsqlitedict',
-    version='2.0.0',
+    version='2.0.1',
     description='Persistent compressed expiring dict in Python, backed up by sqlite3 and pickle',
     long_description=readme,
     long_description_content_type='text/x-rst',

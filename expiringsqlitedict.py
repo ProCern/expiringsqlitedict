@@ -134,7 +134,7 @@ class Connection(MutableMapping):
             '''
             CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_insert_trigger AFTER INSERT ON expiringsqlitedict
             BEGIN
-                DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now', 'utc');
+                DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
             END
             '''
         )
@@ -143,7 +143,7 @@ class Connection(MutableMapping):
             '''
             CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_update_trigger AFTER UPDATE ON expiringsqlitedict
             BEGIN
-                DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now', 'utc');
+                DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
             END
             '''
         )
@@ -182,7 +182,7 @@ class Connection(MutableMapping):
 
     def __setitem__(self, key, value):
         self._connection.execute(
-            "REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, strftime('%s', 'now', 'utc') + ?, ?)",
+            "REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
             (key, self._lifespan, self._serializer.dumps(value)),
             )
 

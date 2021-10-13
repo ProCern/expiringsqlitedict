@@ -91,23 +91,6 @@ Standard Python document strings are inside the module:
   >>> import expiringsqlitedict
   >>> help(expiringsqlitedict)
 
-For developers
---------------
-
-Install::
-
-    # pip install nose
-    # pip install coverage
-
-To perform all tests::
-
-   # make test-all
-
-To perform all tests with coverage::
-
-   # make test-all-with-coverage
-
-
 Comments, bug reports
 ---------------------
 

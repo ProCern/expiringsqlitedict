@@ -4,18 +4,16 @@ expiringsqlitedict -- expiring file-backed ``dict``
 .. _Downloads: https://pypi.python.org/pypi/expiringsqlitedict
 .. _License: https://pypi.python.org/pypi/expiringsqlitedict
 
-A lightweight wrapper around Python's sqlite3 database with a simple, Pythonic
-dict-like interface.
+A lightweight wrapper around Python's sqlite3 database with a MutableMapping
+interface::
 
-.. code-block:: python
-
-  >>> from expiringsqlitedict import SqliteDict
-  >>> with SqliteDict('./my_db.sqlite') as mydict:
-  >>>     mydict['some_key'] = any_picklable_object
-  >>>     print mydict['some_key']  # prints the new value
-  >>>     for key, value in mydict.iteritems():
-  >>>         print key, value
-  >>>     print len(mydict) # etc... all dict functions work
+  from expiringsqlitedict import SqliteDict
+  with SqliteDict('./my_db.sqlite') as mydict:
+      mydict['some_key'] = any_picklable_object
+      print(mydict['some_key'])  # prints the new value
+      for key, value in mydict.items():
+          print((key, value))
+      print(len(mydict)) # etc... all dict functions work
 
 Pickle is used internally by default to serialize the values, and zlib is used
 to optionally compress (on insertion, the value is compressed, and it's stored
@@ -41,28 +39,28 @@ intermittently.
 Features
 --------
 
-* Values can be any picklable objects
+* Values can be any picklable objects (this can be customized to be as flexible
+  as you need, through custom serializers)
 * Support for access from multiple programs or threads, with locking fully
   managed by sqlite itself.
 * A very simple codebase that is easy to read, relying on sqlite for as much
   behavior as possible.
 * A simple autocommit wrapper (``AutocommitSqliteDict``), if you really can't
   handle a context manager and need something that fully handles like a dict.
-* Support for custom serialization or compression:
+* Support for custom serialization or compression::
 
-  .. code-block:: python
+  class JsonSerializer:
+      @staticmethod
+      def loads(data: bytes) -> Any:
+          return json.loads(data.decode('utf-8'))
 
-    class JsonSerializer:
-        @staticmethod
-        def loads(data: sqlite3.Binary) -> Any:
-            return json.loads(data)
-        @staticmethod
-        def dumps(value: Any) -> sqlite3.Binary:
-            json.dumps(data)
+      @staticmethod
+      def dumps(value: Any) -> bytes:
+          return json.dumps(value).encode('utf-8')
     
-    with SqliteDict('some.db', serializer=JsonSerializer()) as mydict:
-        mydict['some_key'] = some_json_encodable_object
-        print mydict['some_key']
+  with SqliteDict('some.db', serializer=JsonSerializer()) as mydict:
+      mydict['some_key'] = some_json_encodable_object
+      print(mydict['some_key'])
 
 
 Installation
@@ -81,12 +79,21 @@ or from the `source tar.gz <http://pypi.python.org/pypi/expiringsqlitedict>`_::
 This module is a single file, so you could also easily import the module in your
 own tree, if your workflow needs that.
 
+Testing
+-------
+
+You may test this by running ``test.py`` with ``PYTHONPATH`` set to the current
+working directory.  There is a convenience makefile to do this for you when you
+run:
+
+.. code-block:: sh
+
+  make test
+
 Documentation
 -------------
 
-Standard Python document strings are inside the module:
-
-.. code-block:: python
+Standard Python document strings are inside the module::
 
   >>> import expiringsqlitedict
   >>> help(expiringsqlitedict)
@@ -102,6 +109,6 @@ requests there.
 
 ``expiringsqlitedict`` is open source software released under the
 `Apache 2.0 license <http://opensource.org/licenses/apache2.0.php>`_.
-Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and
-contributors.  The changes in this fork copyright (c) 2018 Absolute Performance,
-Inc.
+Version <2 Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and
+contributors.
+All versions copyright (c) 2018-2021 Absolute Performance, Inc.

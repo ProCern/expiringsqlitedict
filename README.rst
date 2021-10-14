@@ -47,7 +47,9 @@ Features
   behavior as possible.
 * A simple autocommit wrapper (``AutocommitSqliteDict``), if you really can't
   handle a context manager and need something that fully handles like a dict.
-* Support for custom serialization or compression::
+* Support for custom serialization or compression:
+
+.. code-block:: python
 
   class JsonSerializer:
       @staticmethod

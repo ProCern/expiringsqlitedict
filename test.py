@@ -92,19 +92,21 @@ class TestExpiringDict(unittest.TestCase):
 
             with SqliteDict(db_path, lifespan=timedelta(seconds=1)) as d:
                 d['foo'] = 'bar'
+                d['postponed'] = 'worked'
 
             time.sleep(2.0)
 
             with SqliteDict(db_path) as d:
+                d.postpone('postponed')
                 d['baz'] = 1337
 
             with SqliteDict(db_path) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'baz'})
-                self.assertEqual(set(d.keys()), {'baz'})
-                self.assertEqual(set(d.items()), {('baz', 1337)})
-                self.assertEqual(set(d.values()), {1337})
-                self.assertEqual(len(d), 1)
+                self.assertEqual(set(d), {'baz', 'postponed'})
+                self.assertEqual(set(d.keys()), {'baz', 'postponed'})
+                self.assertEqual(set(d.items()), {('baz', 1337), ('postponed', 'worked')})
+                self.assertEqual(set(d.values()), {1337, 'worked'})
+                self.assertEqual(len(d), 2)
 
 if __name__ == '__main__':
     unittest.main()

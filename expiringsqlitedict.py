@@ -221,3 +221,11 @@ class Connection(MutableMapping):
 
     def clear(self) -> None:
         self._connection.execute('DELETE FROM expiringsqlitedict')
+
+    def postpone(self, key: str) -> None:
+        '''Push back the expiration date of the given entry, if it exists.
+        '''
+        self._connection.execute(
+            "UPDATE expiringsqlitedict SET expire=strftime('%s', 'now') + ? WHERE key=?",
+            (self._lifespan, key),
+            )

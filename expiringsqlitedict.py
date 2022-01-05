@@ -56,10 +56,7 @@ class Serializer(ABC):
     @classmethod
     def __subclasshook__(cls, C):
         if cls is Serializer:
-            if all((
-                any('loads' in B.__dict__ for B in C.__mro__),
-                any('dumps' in B.__dict__ for B in C.__mro__),
-            )):
+            if all(any(meth in B.__dict__ for B in C.__mro__) for meth in ('loads', 'dumps')):
                 return True
         return NotImplemented
 

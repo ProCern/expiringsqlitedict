@@ -8,25 +8,18 @@ from datetime import timedelta
 from tempfile import TemporaryDirectory
 import time
 from pathlib import Path
-from expiringsqlitedict import SqliteDict, AutocommitSqliteDict
+from expiringsqlitedict import SqliteDict, AutocommitSqliteDict, ZlibPickleSerializer, OnDemand
 from typing import Any
 import json
-
-class JsonSerializer:
-    @staticmethod
-    def loads(data: bytes) -> Any:
-        return json.loads(data.decode('utf-8'))
-
-    @staticmethod
-    def dumps(value: Any) -> bytes:
-        return json.dumps(value).encode('utf-8')
+import marshal
+import pickle
 
 class TestExpiringDict(unittest.TestCase):
     def test_simple(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path) as d:
+            with OnDemand(db_path, serializer=ZlibPickleSerializer) as d:
                 self.assertFalse(bool(d))
                 self.assertEqual(set(d), set())
                 self.assertEqual(set(d.keys()), set())
@@ -36,7 +29,7 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
-            with SqliteDict(db_path) as d:
+            with SqliteDict(db_path, serializer=ZlibPickleSerializer) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'foo', 'baz'})
                 self.assertEqual(set(d.keys()), {'foo', 'baz'})
@@ -80,10 +73,30 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path, serializer = JsonSerializer()) as d:
+            with SqliteDict(db_path, serializer = json) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(db_path, serializer = JsonSerializer()) as d:
+            with SqliteDict(db_path, serializer = json) as d:
+                self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
+
+    def test_pickle(self):
+        with TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / 'test.db'
+
+            with SqliteDict(db_path, serializer = pickle) as d:
+                d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
+
+            with SqliteDict(db_path, serializer = pickle) as d:
+                self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
+
+    def test_marshal(self):
+        with TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / 'test.db'
+
+            with SqliteDict(db_path, serializer = marshal) as d:
+                d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
+
+            with SqliteDict(db_path, serializer = marshal) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_expire(self):

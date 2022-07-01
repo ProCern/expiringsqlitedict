@@ -22,45 +22,41 @@ You can specify your own serializer as well, with ``loads()`` and ``dumps()`` me
 
     class JsonSerializer:
         @staticmethod
-        def loads(data: bytes) -> Any:
-            return json.loads(data.decode('utf-8'))
+        def loads(data: str) -> Any:
+            return json.loads(data)
 
         @staticmethod
-        def dumps(value: Any) -> bytes:
-            return json.dumps(value).encode('utf-8')
+        def dumps(value: Any) -> str:
+            return json.dumps(value, separators=(',', ':'))
+
+You can also actually just use the json module itself instead, if you don't want to customize dumping or loading.
+
+Note that the loads and dumps should take in data in types that it expects
+sqlite to hold, and put out data that sqlite can store.  If you expect a bytes
+but sqlite gives you a string, that's on you.  You should do proper type
+checking, or make sure you never put data in a type you don't want to get back.
 """
 
+from collections.abc import MutableMapping
+from contextlib import contextmanager
 from datetime import timedelta
+from typing import Any, Iterator, Tuple
+import json
 import pickle
 import sqlite3
 import zlib
-from typing import Any, Iterator, Tuple
-from collections.abc import MutableMapping
 
-from abc import ABC, abstractmethod
-
-class Serializer(ABC):
-    '''Simple abstract base class for serializers.
-
-    Simply checks for the presence of a dumps and loads method.
+@contextmanager
+def _cursor(db: sqlite3.Connection):
+    '''Wrap the cursor in a context manager that closes it on exit, rather than waiting until __del__.
     '''
+    cur = db.cursor()
+    try:
+        yield cur
+    finally:
+        cur.close()
 
-    @abstractmethod
-    def dumps(self, value: Any) -> bytes:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def loads(self, data: bytes) -> Any:
-        raise NotImplementedError()
-
-    @classmethod
-    def __subclasshook__(cls, C):
-        if cls is Serializer:
-            if all(any(meth in B.__dict__ for B in C.__mro__) for meth in ('loads', 'dumps')):
-                return True
-        return NotImplemented
-
-class ZlibPickleSerializer(Serializer):
+class ZlibPickleSerializer:
     '''Serializer that pickles and optionally zlib-compresses data.
     '''
 
@@ -101,16 +97,21 @@ class SqliteDict:
     customize your connection, such as making it read-only.
     """
 
-    def __init__(self, *args, serializer: Any = ZlibPickleSerializer(), lifespan: timedelta = timedelta(days=7), **kwargs) -> None:
-        if not isinstance(serializer, Serializer):
-            raise TypeError('serializer must be a Serializer')
-        self._db = sqlite3.connect(*args, **kwargs)
-        self._db.isolation_level = None
+    def __init__(self, *args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), transaction: str = 'IMMEDIATE', **kwargs) -> None:
+        self._db = sqlite3.connect(*args, isolation_level=None, **kwargs)
+        with _cursor(self._db) as cursor:
+            cursor.execute('PRAGMA journal_mode=WAL')
+            cursor.execute('PRAGMA synchronous=NORMAL')
         self._serializer = serializer
         self._lifespan = lifespan
+        self._begin = f'BEGIN {transaction} TRANSACTION'
 
     def __enter__(self) -> 'Connection':
-        self._db.execute('BEGIN TRANSACTION')
+        if self._db is None:
+            raise RuntimeError('Can not use after close')
+        with _cursor(self._db) as cursor:
+            cursor.execute(self._begin)
+
         return Connection(
             self._db,
             serializer=self._serializer,
@@ -118,23 +119,70 @@ class SqliteDict:
         )
 
     def __exit__(self, type, value, traceback) -> None:
+        if self._db is None:
+            raise RuntimeError('Can not use after close')
+
         if (type and value and traceback) is None:
-            self._db.execute('COMMIT')
+            with _cursor(self._db) as cursor:
+                cursor.execute('COMMIT')
         else:
-            self._db.execute('ROLLBACK')
+            with _cursor(self._db) as cursor:
+                cursor.execute('ROLLBACK')
+
+    def close(self):
+        if self._db is not None:
+            try:
+                with _cursor(self._db) as cursor:
+                    cursor.execute('PRAGMA analysis_limit=8192')
+                    cursor.execute('PRAGMA optimize')
+                self._db.close()
+            finally:
+                self._db = None
 
     def __del__(self):
-        self._db.close()
+        self.close()
 
-def AutocommitSqliteDict(*args, serializer: Any = ZlibPickleSerializer(), lifespan: timedelta = timedelta(days=7), **kwargs) -> 'Connection':
+class OnDemand:
+    def __init__(self, *args, **kwargs):
+        self._args = args
+        self._kwargs = kwargs
+        self._manager = None
+
+    def __enter__(self):
+        if self._manager is not None:
+            raise RuntimeError("Can not enter SelfContained before it has been exited")
+
+        self._manager = SqliteDict(*self._args, **self._kwargs)
+        return self._manager.__enter__()
+
+    def __exit__(self, type, value, traceback):
+        if self._manager is None:
+            raise RuntimeError("Can not exit SelfContained before it has been entered")
+
+        try:
+            try:
+                self._manager.__exit__(type, value, traceback)
+            finally:
+                self._manager.close()
+        finally:
+            self._manager = None
+
+def AutocommitSqliteDict(*args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), **kwargs) -> 'Connection':
     """
     Set up the sqlite dictionary manager as a non-contextmanager in autocommit mode.
+    Kwargs in this dict may customize the isolation_level, if you wish.
+
+    Unlike the normal SqliteDict, this won't try to optimize the database on __del__.
     """
-    if not isinstance(serializer, Serializer):
-        raise TypeError('serializer must be a Serializer')
+
+    if 'isolation_level' not in kwargs:
+        kwargs['isolation_level'] = None
 
     db = sqlite3.connect(*args, **kwargs)
-    db.isolation_level = None
+    with _cursor(db) as cursor:
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA synchronous=NORMAL')
+
     return Connection(
         db,
         serializer=serializer,
@@ -142,87 +190,97 @@ def AutocommitSqliteDict(*args, serializer: Any = ZlibPickleSerializer(), lifesp
     )
 
 class Connection(MutableMapping):
-    def __init__(self, connection: sqlite3.Connection, serializer: Serializer, lifespan: timedelta) -> None:
+    def __init__(self, connection: sqlite3.Connection, serializer: Any, lifespan: timedelta) -> None:
         self._lifespan = lifespan.total_seconds();
         self._serializer = serializer
         self._connection = connection
+        with _cursor(self._connection) as cursor:
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS expiringsqlitedict (
+                key TEXT PRIMARY KEY NOT NULL,
+                expire INTEGER NOT NULL,
+                value BLOB NOT NULL)
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON expiringsqlitedict (expire)')
 
-        self._connection.execute('''
-        CREATE TABLE IF NOT EXISTS expiringsqlitedict (
-            key TEXT UNIQUE NOT NULL,
-            expire INTEGER NOT NULL,
-            value BLOB NOT NULL)
-        ''')
-        self._connection.execute('CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON expiringsqlitedict (expire)')
+            cursor.execute(
+                '''
+                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_insert_trigger AFTER INSERT ON expiringsqlitedict
+                BEGIN
+                    DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
+                END
+                '''
+            )
 
-        self._connection.execute(
-            '''
-            CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_insert_trigger AFTER INSERT ON expiringsqlitedict
-            BEGIN
-                DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
-            END
-            '''
-        )
-
-        self._connection.execute(
-            '''
-            CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_update_trigger AFTER UPDATE ON expiringsqlitedict
-            BEGIN
-                DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
-            END
-            '''
-        )
+            cursor.execute(
+                '''
+                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_update_trigger AFTER UPDATE ON expiringsqlitedict
+                BEGIN
+                    DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
+                END
+                '''
+            )
 
     def __len__(self) -> int:
-        for row in self._connection.execute('SELECT COUNT(*) FROM expiringsqlitedict'):
-            return row[0]
+        with _cursor(self._connection) as cursor:
+            for row in cursor.execute('SELECT COUNT(*) FROM expiringsqlitedict'):
+                return row[0]
         return 0
 
     def __bool__(self) -> bool:
         return len(self) > 0
 
     def keys(self) -> Iterator[str]:
-        for row in self._connection.execute('SELECT key FROM expiringsqlitedict'):
-            yield row[0]
+        with _cursor(self._connection) as cursor:
+            for row in cursor.execute('SELECT key FROM expiringsqlitedict'):
+                yield row[0]
 
     __iter__ = keys
 
     def values(self) -> Iterator[Any]:
-        for row in self._connection.execute('SELECT value FROM expiringsqlitedict'):
-            yield self._serializer.loads(bytes(row[0]))
+        with _cursor(self._connection) as cursor:
+            for row in cursor.execute('SELECT value FROM expiringsqlitedict'):
+                yield self._serializer.loads(row[0])
 
     def items(self) -> Iterator[Tuple[str, Any]]:
-        for row in self._connection.execute('SELECT key, value FROM expiringsqlitedict'):
-            yield row[0], self._serializer.loads(bytes(row[1]))
+        with _cursor(self._connection) as cursor:
+            for row in cursor.execute('SELECT key, value FROM expiringsqlitedict'):
+                yield row[0], self._serializer.loads(row[1])
 
     def __contains__(self, key: str) -> bool:
-        for _ in self._connection.execute('SELECT 1 FROM expiringsqlitedict WHERE key = ?', (key,)):
-            return True
+        with _cursor(self._connection) as cursor:
+            for _ in cursor.execute('SELECT 1 FROM expiringsqlitedict WHERE key = ?', (key,)):
+                return True
         return False
 
     def __getitem__(self, key: str) -> Any:
-        for row in self._connection.execute('SELECT value FROM expiringsqlitedict WHERE key = ?', (key,)):
-            return self._serializer.loads(bytes(row[0]))
+        with _cursor(self._connection) as cursor:
+            for row in cursor.execute('SELECT value FROM expiringsqlitedict WHERE key = ?', (key,)):
+                return self._serializer.loads(row[0])
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
-        self._connection.execute(
-            "REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
-            (key, self._lifespan, self._serializer.dumps(value)),
-            )
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
+                (key, self._lifespan, self._serializer.dumps(value)),
+                )
 
     def __delitem__(self, key: str) -> None:
         if key not in self:
             raise KeyError(key)
-        self._connection.execute('DELETE FROM expiringsqlitedict WHERE key=?', (key,))
+        with _cursor(self._connection) as cursor:
+            cursor.execute('DELETE FROM expiringsqlitedict WHERE key=?', (key,))
 
     def clear(self) -> None:
-        self._connection.execute('DELETE FROM expiringsqlitedict')
+        with _cursor(self._connection) as cursor:
+            cursor.execute('DELETE FROM expiringsqlitedict')
 
     def postpone(self, key: str) -> None:
         '''Push back the expiration date of the given entry, if it exists.
         '''
-        self._connection.execute(
-            "UPDATE expiringsqlitedict SET expire=strftime('%s', 'now') + ? WHERE key=?",
-            (self._lifespan, key),
-            )
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "UPDATE expiringsqlitedict SET expire=strftime('%s', 'now') + ? WHERE key=?",
+                (self._lifespan, key),
+                )

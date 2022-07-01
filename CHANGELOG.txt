@@ -1,5 +1,19 @@
 Changes
 =======
+3.0.0, 2022-07-01
+* Remove the serializer ABC.
+* Use WAL, serialized=NORMAL, and optimize the database on close.
+* Allow serializers to use many types, instead of just bytes.
+* Allow non-class serializers, like the json module (and other similar modules).
+* Change default serializer to json.
+* Use cursors for all operation, instead of the implicit db.execute.
+* Allow customizing transaction type, defaulting to IMMEDIATE.
+* Make a SqliteDict.close method, so the user doesn't have to wait until program
+  exit.
+* Add a OnDemand, allowing opening a SqliteDict, entering it, and closing
+  it in one context manager that is reentrant.  The use of it is the same, but
+  it won't open until needed and will immediately close when done with.
+
 2.1.0, 2021-10-13
 * Fill type hints through all parts of module
 

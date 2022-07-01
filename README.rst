@@ -51,16 +51,9 @@ Features
 
 .. code-block:: python
 
-  class JsonSerializer:
-      @staticmethod
-      def loads(data: bytes) -> Any:
-          return json.loads(data.decode('utf-8'))
-
-      @staticmethod
-      def dumps(value: Any) -> bytes:
-          return json.dumps(value).encode('utf-8')
+  import json
     
-  with SqliteDict('some.db', serializer=JsonSerializer()) as mydict:
+  with SqliteDict('some.db', serializer=json) as mydict:
       mydict['some_key'] = some_json_encodable_object
       print(mydict['some_key'])
 

@@ -92,9 +92,9 @@ class SqliteDict:
     """
     Set up the sqlite dictionary manager.
 
-    This needs to be used as a context manager.  It will not operate at all otherwise.
-    args and kwargs are directly passed to sqlite3.connect.  Use these to
-    customize your connection, such as making it read-only.
+    This needs to be used as a context manager.  It will not operate at all
+    otherwise. args and kwargs are directly passed to sqlite3.connect.  Use
+    these to customize your connection, such as making it read-only.
     """
 
     def __init__(self, *args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), transaction: str = 'IMMEDIATE', **kwargs) -> None:
@@ -130,6 +130,10 @@ class SqliteDict:
                 cursor.execute('ROLLBACK')
 
     def close(self):
+        '''Optimize and close the database.
+
+        Idempotent.
+        '''
         if self._db is not None:
             try:
                 with _cursor(self._db) as cursor:
@@ -143,12 +147,16 @@ class SqliteDict:
         self.close()
 
 class OnDemand:
+    '''A wrapper around a database that is a reusable context-manager that
+    opens the databaseon-demand and closes it immediately when finished with
+    it.
+    '''
     def __init__(self, *args, **kwargs):
         self._args = args
         self._kwargs = kwargs
         self._manager = None
 
-    def __enter__(self):
+    def __enter__(self) -> 'Connection':
         if self._manager is not None:
             raise RuntimeError("Can not enter SelfContained before it has been exited")
 

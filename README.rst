@@ -15,20 +15,20 @@ interface::
           print((key, value))
       print(len(mydict)) # etc... all dict functions work
 
-Pickle is used internally by default to serialize the values, and zlib is used
-to optionally compress (on insertion, the value is compressed, and it's stored
-compressed if the compressed value is smaller than uncompressed). Keys are
-arbitrary strings, values arbitrary pickle-able objects.  This must be used
+json is used internally by default to serialize the values. Keys are
+arbitrary strings, values arbitrary json-able objects.  This must be used
 within a context manager, and serialization can be overridden with your own.
 The database is wrapped with a transaction, and any exception thrown out of the
 context manager rolls back all changes.
 
 This was forked off of `sqlitedict <https://github.com/RaRe-Technologies/sqlitedict>`_
 in order to add auto-expiring functionality, and initially was quite similar to
-it.  Version 2.0 splits of completely and takes the module into a complete
-rewrite, mostly to remove unnecesary Ptyhon 2 compatibility, simplify the API,
+it.  Version 2.0 split of completely and takes the module into a complete
+rewrite, mostly to remove unnecessary Python 2 compatibility, simplify the API,
 completely enforce a context manager for typical cases, add full typing
 throughout, and use sqlite triggers for expiration cleanup.
+
+Version 3 set the default encoding to json, and made many other API refinements.
 
 This version also does not vacuum at all automatically.  It did in previous
 versions, but this was kind of a silly behavior to put into the library itself.
@@ -39,14 +39,16 @@ intermittently.
 Features
 --------
 
-* Values can be any picklable objects (this can be customized to be as flexible
-  as you need, through custom serializers)
+* Values can be any json-capable objects (this can be customized to be as
+  flexible as you need, through custom serializers)
 * Support for access from multiple programs or threads, with locking fully
   managed by sqlite itself.
 * A very simple codebase that is easy to read, relying on sqlite for as much
   behavior as possible.
 * A simple autocommit wrapper (``AutocommitSqliteDict``), if you really can't
   handle a context manager and need something that fully handles like a dict.
+* An on-demand wrapper (``OnDemand``), for situations where you want to open and
+  close the database in as narrow a window as possible.
 * Support for custom serialization or compression:
 
 .. code-block:: python
@@ -56,7 +58,6 @@ Features
   with SqliteDict('some.db', serializer=json) as mydict:
       mydict['some_key'] = some_json_encodable_object
       print(mydict['some_key'])
-
 
 Installation
 ------------
@@ -104,6 +105,5 @@ requests there.
 
 ``expiringsqlitedict`` is open source software released under the
 `Apache 2.0 license <http://opensource.org/licenses/apache2.0.php>`_.
-Version <2 Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and
-contributors.
-All versions copyright (c) 2018-2021 Absolute Performance, Inc.
+Version <2 Copyright (c) 2011-2018 `Radim Řehůřek <http://radimrehurek.com>`_ and contributors.
+All versions copyright (c) 2018-2022 Absolute Performance, Inc.

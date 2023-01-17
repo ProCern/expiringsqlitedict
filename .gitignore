@@ -26,3 +26,8 @@ pip-log.txt
 
 _build
 
+venv/
+.venv/
+env/
+.env/
+

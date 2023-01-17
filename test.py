@@ -103,14 +103,16 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path), lifespan=timedelta(seconds=1)) as d:
+            with SqliteDict(str(db_path)) as d:
                 d['foo'] = 'bar'
                 d['postponed'] = 'worked'
 
-            time.sleep(2.0)
-
             with SqliteDict(str(db_path)) as d:
+                d.lifespan = timedelta(weeks=-1)
+                d.postpone_all()
+                d.lifespan = timedelta(weeks=1)
                 d.postpone('postponed')
+                # This triggers the actual expiry
                 d['baz'] = 1337
 
             with SqliteDict(str(db_path)) as d:

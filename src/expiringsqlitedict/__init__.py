@@ -10,41 +10,16 @@
 #  * http://code.activestate.com/recipes/576638-draft-for-an-sqlite3-based-dbm/
 #  * http://code.activestate.com/recipes/526618/
 
-"""
-A lightweight wrapper around Python's sqlite3 database, with a MutableMapping interface::
 
-    with SqliteDict('some.db') as mydict: # the mapping will be persisted to file `some.db`
-        mydict['some_key'] = any_picklable_object
-        print(mydict['some_key'])
-        print(len(mydict)) # etc... all dict functions work
-
-You can specify your own serializer as well, with ``loads()`` and ``dumps()`` methods::
-
-    class JsonSerializer:
-        @staticmethod
-        def loads(data: str) -> Any:
-            return json.loads(data)
-
-        @staticmethod
-        def dumps(value: Any) -> str:
-            return json.dumps(value, separators=(',', ':'))
-
-You can also actually just use the json module itself instead, if you don't want to customize dumping or loading.
-
-Note that the loads and dumps should take in data in types that it expects
-sqlite to hold, and put out data that sqlite can store.  If you expect a bytes
-but sqlite gives you a string, that's on you.  You should do proper type
-checking, or make sure you never put data in a type you don't want to get back.
-"""
-
-from collections.abc import MutableMapping
-from contextlib import contextmanager
+from collections.abc import Mapping, MutableMapping
+from contextlib import contextmanager, closing
 from datetime import timedelta
-from typing import Any, Iterator, Tuple
+from typing import Any, Iterator, Optional, Tuple, Union
 import json
 import pickle
 import sqlite3
 import zlib
+from weakref import finalize
 
 @contextmanager
 def _cursor(db: sqlite3.Connection):
@@ -88,6 +63,14 @@ class ZlibPickleSerializer:
 
         return pickle.loads(pickled)
 
+def _close(db):
+    '''Optimize and close the database.
+    '''
+    with _cursor(db) as cursor:
+        cursor.execute('PRAGMA analysis_limit=8192')
+        cursor.execute('PRAGMA optimize')
+    db.close()
+
 class SqliteDict:
     """
     Set up the sqlite dictionary manager.
@@ -97,7 +80,7 @@ class SqliteDict:
     these to customize your connection, such as making it read-only.
     """
 
-    def __init__(self, *args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), transaction: str = 'IMMEDIATE', **kwargs) -> None:
+    def __init__(self, *args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), transaction: str = 'IMMEDIATE', table: str = 'expiringsqlitedict', **kwargs) -> None:
         self._db = sqlite3.connect(*args, isolation_level=None, **kwargs)
         with _cursor(self._db) as cursor:
             cursor.execute('PRAGMA journal_mode=WAL')
@@ -105,10 +88,10 @@ class SqliteDict:
         self._serializer = serializer
         self._lifespan = lifespan
         self._begin = f'BEGIN {transaction} TRANSACTION'
+        self._table = table
+        self._finalizer = finalize(self, _close, self._db)
 
     def __enter__(self) -> 'Connection':
-        if self._db is None:
-            raise RuntimeError('Can not use after close')
         with _cursor(self._db) as cursor:
             cursor.execute(self._begin)
 
@@ -116,12 +99,10 @@ class SqliteDict:
             self._db,
             serializer=self._serializer,
             lifespan=self._lifespan,
+            table=self._table,
         )
 
     def __exit__(self, type, value, traceback) -> None:
-        if self._db is None:
-            raise RuntimeError('Can not use after close')
-
         if (type and value and traceback) is None:
             with _cursor(self._db) as cursor:
                 cursor.execute('COMMIT')
@@ -130,165 +111,169 @@ class SqliteDict:
                 cursor.execute('ROLLBACK')
 
     def close(self):
-        '''Optimize and close the database.
+        '''Close and optimize the database.'''
 
-        Idempotent.
-        '''
-        if self._db is not None:
-            try:
-                with _cursor(self._db) as cursor:
-                    cursor.execute('PRAGMA analysis_limit=8192')
-                    cursor.execute('PRAGMA optimize')
-                self._db.close()
-            finally:
-                self._db = None
+        self._finalizer()
 
-    def __del__(self):
-        self.close()
-
-class OnDemand:
-    '''A wrapper around a database that is a reusable context-manager that
-    opens the databaseon-demand and closes it immediately when finished with
-    it.
+@contextmanager
+def OnDemand(*args, **kwargs):
+    '''A wrapper around a database that is a context-manager that opens the
+    database on-demand and closes it immediately when finished with it.
     '''
-    def __init__(self, *args, **kwargs):
-        self._args = args
-        self._kwargs = kwargs
-        self._manager = None
+    manager = SqliteDict(*args, **kwargs)
+    with closing(manager), manager as connection:
+        yield connection
 
-    def __enter__(self) -> 'Connection':
-        if self._manager is not None:
-            raise RuntimeError("Can not enter SelfContained before it has been exited")
-
-        self._manager = SqliteDict(*self._args, **self._kwargs)
-        return self._manager.__enter__()
-
-    def __exit__(self, type, value, traceback):
-        if self._manager is None:
-            raise RuntimeError("Can not exit SelfContained before it has been entered")
-
-        try:
-            try:
-                self._manager.__exit__(type, value, traceback)
-            finally:
-                self._manager.close()
-        finally:
-            self._manager = None
-
-def AutocommitSqliteDict(*args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), **kwargs) -> 'Connection':
+def AutocommitSqliteDict(*args, serializer: Any = json, lifespan: timedelta = timedelta(days=7), table: str = 'expiringsqlitedict', **kwargs) -> 'Connection':
     """
     Set up the sqlite dictionary manager as a non-contextmanager in autocommit mode.
-    Kwargs in this dict may customize the isolation_level, if you wish.
-
-    Unlike the normal SqliteDict, this won't try to optimize the database on __del__.
     """
 
-    if 'isolation_level' not in kwargs:
-        kwargs['isolation_level'] = None
-
-    db = sqlite3.connect(*args, **kwargs)
+    db = sqlite3.connect(*args, isolation_level=None, **kwargs)
     with _cursor(db) as cursor:
         cursor.execute('PRAGMA journal_mode=WAL')
         cursor.execute('PRAGMA synchronous=NORMAL')
 
-    return Connection(
+    connection = Connection(
         db,
         serializer=serializer,
         lifespan=lifespan,
+        table=table,
     )
 
+    finalize(connection, _close, db)
+
+    return connection
+
 class Connection(MutableMapping):
-    def __init__(self, connection: sqlite3.Connection, serializer: Any, lifespan: timedelta) -> None:
+    '''The actual connection object, as a MutableMapping[str, Any].
+
+    Items are expired when a value is inserted or updated.  Deletion or postponement does not expire items.
+    '''
+
+    def __init__(self, connection: sqlite3.Connection, serializer: Any, lifespan: timedelta, table: str = 'expiringsqlitedict') -> None:
         self._lifespan = lifespan.total_seconds();
         self._serializer = serializer
         self._connection = connection
+        self._table = table
         with _cursor(self._connection) as cursor:
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS expiringsqlitedict (
+            cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS {table} (
                 key TEXT PRIMARY KEY NOT NULL,
                 expire INTEGER NOT NULL,
-                value BLOB NOT NULL)
+                value BLOB NOT NULL) WITHOUT ROWID
             ''')
-            cursor.execute('CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON expiringsqlitedict (expire)')
+            cursor.execute(f'CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON {table} (expire)')
 
             cursor.execute(
-                '''
-                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_insert_trigger AFTER INSERT ON expiringsqlitedict
+                f'''
+                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_insert_trigger AFTER INSERT ON {table}
                 BEGIN
-                    DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
+                    DELETE FROM {table} WHERE expire <= strftime('%s', 'now');
                 END
                 '''
             )
 
             cursor.execute(
-                '''
-                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_update_trigger AFTER UPDATE ON expiringsqlitedict
+                f'''
+                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_update_trigger AFTER UPDATE OF value ON {table}
                 BEGIN
-                    DELETE FROM expiringsqlitedict WHERE expire <= strftime('%s', 'now');
+                    DELETE FROM {table} WHERE expire <= strftime('%s', 'now');
                 END
                 '''
             )
 
     def __len__(self) -> int:
+        '''Get the count of keys in the table.
+        '''
+
         with _cursor(self._connection) as cursor:
-            for row in cursor.execute('SELECT COUNT(*) FROM expiringsqlitedict'):
+            for row in cursor.execute(f'SELECT COUNT(*) FROM {self._table}'):
                 return row[0]
         return 0
 
     def __bool__(self) -> bool:
+        '''Check if the table is not empty.'''
+
         return len(self) > 0
 
     def keys(self) -> Iterator[str]:
+        '''Iterate over keys in the table.
+        '''
+
         with _cursor(self._connection) as cursor:
-            for row in cursor.execute('SELECT key FROM expiringsqlitedict'):
+            for row in cursor.execute(f'SELECT key FROM {self._table}'):
                 yield row[0]
 
     __iter__ = keys
 
     def values(self) -> Iterator[Any]:
+        '''Iterate over values in the table.
+        '''
+
         with _cursor(self._connection) as cursor:
-            for row in cursor.execute('SELECT value FROM expiringsqlitedict'):
+            for row in cursor.execute(f'SELECT value FROM {self._table}'):
                 yield self._serializer.loads(row[0])
 
     def items(self) -> Iterator[Tuple[str, Any]]:
+        '''Iterate over keys and values in the table.
+        '''
+
         with _cursor(self._connection) as cursor:
-            for row in cursor.execute('SELECT key, value FROM expiringsqlitedict'):
+            for row in cursor.execute(f'SELECT key, value FROM {self._table}'):
                 yield row[0], self._serializer.loads(row[1])
 
     def __contains__(self, key: str) -> bool:
+        '''Check if the table contains the given key.
+        '''
+
         with _cursor(self._connection) as cursor:
-            for _ in cursor.execute('SELECT 1 FROM expiringsqlitedict WHERE key = ?', (key,)):
+            for _ in cursor.execute(f'SELECT 1 FROM {self._table} WHERE key = ?', (key,)):
                 return True
         return False
 
     def __getitem__(self, key: str) -> Any:
+        '''Fetch the key.
+        '''
+
         with _cursor(self._connection) as cursor:
-            for row in cursor.execute('SELECT value FROM expiringsqlitedict WHERE key = ?', (key,)):
+            for row in cursor.execute(f'SELECT value FROM {self._table} WHERE key = ?', (key,)):
                 return self._serializer.loads(row[0])
         raise KeyError(key)
 
     def __setitem__(self, key: str, value: Any) -> None:
+        '''Set or replace the item.
+
+        This also triggers cleaning up expired values.
+        '''
+
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "REPLACE INTO expiringsqlitedict (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
+                f"REPLACE INTO {self._table} (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
                 (key, self._lifespan, self._serializer.dumps(value)),
                 )
 
     def __delitem__(self, key: str) -> None:
+        '''Delete an item from the table.
+        '''
+
         if key not in self:
             raise KeyError(key)
         with _cursor(self._connection) as cursor:
-            cursor.execute('DELETE FROM expiringsqlitedict WHERE key=?', (key,))
+            cursor.execute(f'DELETE FROM {self._table} WHERE key=?', (key,))
 
     def clear(self) -> None:
+        '''Delete all items from the table.
+        '''
+
         with _cursor(self._connection) as cursor:
-            cursor.execute('DELETE FROM expiringsqlitedict')
+            cursor.execute(f'DELETE FROM {self._table}')
 
     def postpone(self, key: str) -> None:
         '''Push back the expiration date of the given entry, if it exists.
         '''
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "UPDATE expiringsqlitedict SET expire=strftime('%s', 'now') + ? WHERE key=?",
+                f"UPDATE {self._table} SET expire=strftime('%s', 'now') + ? WHERE key=?",
                 (self._lifespan, key),
                 )

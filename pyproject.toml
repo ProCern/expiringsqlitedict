@@ -1,0 +1,29 @@
+[project]
+name = 'expiringsqlitedict'
+description = 'Persistent compressed expiring dict in Python, backed up by sqlite3 and pickle'
+version = '3.1.0'
+readme = 'README.rst'
+requires-python = '>= 3.6, < 4'
+license = { text = 'Apache 2.0' }
+classifiers = [
+    'Development Status :: 5 - Production/Stable',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: Apache Software License',
+    'Operating System :: OS Independent',
+    'Programming Language :: Python :: 3.6',
+    'Topic :: Database :: Front-Ends',
+    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Topic :: Software Development :: Libraries',
+]
+
+[[project.authors]]
+name = "Taylor C. Richberger"
+email = "tcr@absolute-performance.com"
+
+[project.urls]
+repository  = 'https://github.com/absperf/expiringsqlitedict'
+documentation = 'https://expiringsqlitedict.readthedocs.io/'
+
+[build-system]
+build-backend = "flit_core.buildapi"
+requires = ["flit_core >=3.2,<4", 'wheel']

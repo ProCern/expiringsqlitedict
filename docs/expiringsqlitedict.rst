@@ -1,0 +1,6 @@
+expiringsqlitedict
+==================
+
+.. automodule:: expiringsqlitedict
+  :members:
+

@@ -24,3 +24,5 @@ pip-log.txt
 # sqlite databases
 *.sqlite
 
+_build
+

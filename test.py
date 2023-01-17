@@ -19,7 +19,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with OnDemand(db_path, serializer=ZlibPickleSerializer) as d:
+            with OnDemand(str(db_path), serializer=ZlibPickleSerializer) as d:
                 self.assertFalse(bool(d))
                 self.assertEqual(set(d), set())
                 self.assertEqual(set(d.keys()), set())
@@ -29,7 +29,7 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
-            with SqliteDict(db_path, serializer=ZlibPickleSerializer) as d:
+            with SqliteDict(str(db_path), serializer=ZlibPickleSerializer) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'foo', 'baz'})
                 self.assertEqual(set(d.keys()), {'foo', 'baz'})
@@ -41,7 +41,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            d = AutocommitSqliteDict(db_path)
+            d = AutocommitSqliteDict(str(db_path))
             self.assertFalse(bool(d))
             self.assertEqual(set(d), set())
             self.assertEqual(set(d.keys()), set())
@@ -51,7 +51,7 @@ class TestExpiringDict(unittest.TestCase):
             d['foo'] = 'bar'
             d['baz'] = 1337
 
-            d = AutocommitSqliteDict(db_path)
+            d = AutocommitSqliteDict(str(db_path))
             self.assertTrue(bool(d))
             self.assertEqual(set(d), {'foo', 'baz'})
             self.assertEqual(set(d.keys()), {'foo', 'baz'})
@@ -63,57 +63,57 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path) as d:
+            with SqliteDict(str(db_path)) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(db_path) as d:
+            with SqliteDict(str(db_path)) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_json(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path, serializer = json) as d:
+            with SqliteDict(str(db_path), serializer = json) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(db_path, serializer = json) as d:
+            with SqliteDict(str(db_path), serializer = json) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_pickle(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path, serializer = pickle) as d:
+            with SqliteDict(str(db_path), serializer = pickle) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(db_path, serializer = pickle) as d:
+            with SqliteDict(str(db_path), serializer = pickle) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_marshal(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path, serializer = marshal) as d:
+            with SqliteDict(str(db_path), serializer = marshal) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(db_path, serializer = marshal) as d:
+            with SqliteDict(str(db_path), serializer = marshal) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_expire(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(db_path, lifespan=timedelta(seconds=1)) as d:
+            with SqliteDict(str(db_path), lifespan=timedelta(seconds=1)) as d:
                 d['foo'] = 'bar'
                 d['postponed'] = 'worked'
 
             time.sleep(2.0)
 
-            with SqliteDict(db_path) as d:
+            with SqliteDict(str(db_path)) as d:
                 d.postpone('postponed')
                 d['baz'] = 1337
 
-            with SqliteDict(db_path) as d:
+            with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'baz', 'postponed'})
                 self.assertEqual(set(d.keys()), {'baz', 'postponed'})

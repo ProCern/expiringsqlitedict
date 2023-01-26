@@ -15,12 +15,7 @@ from collections.abc import Mapping, MutableMapping
 from contextlib import contextmanager, closing
 from datetime import timedelta
 from typing import Any, Iterator, Optional, Tuple, Union
-
-try:
-    import ujson as json
-except ImportError:
-    import json
-
+import json
 import pickle
 import sqlite3
 import zlib

@@ -25,6 +25,8 @@ class ZlibPickleSerializer:
     '''Serializer that pickles and optionally zlib-compresses data.
     '''
 
+    __slots__ = ()
+
     @staticmethod
     def dumps(value: Any) -> bytes:
         """Serialize an object using pickle to a binary format accepted by SQLite."""
@@ -68,6 +70,8 @@ class SqliteDict:
     otherwise. args and kwargs are directly passed to sqlite3.connect.  Use
     these to customize your connection, such as making it read-only.
     """
+
+    __slots__ = ('_db', '_serializer', '_lifespan', '_begin', '_table', '_finalizer', '__weakref__')
 
     def __init__(self, *args, serializer: Any = json, lifespan: timedelta = timedelta(weeks=1), transaction: str = 'IMMEDIATE', table: str = 'expiringsqlitedict', **kwargs) -> None:
         self._db = sqlite3.connect(*args, isolation_level=None, **kwargs)
@@ -153,6 +157,8 @@ class Connection(MutableMapping):
 
     Items are expired when a value is inserted or updated.  Deletion or postponement does not expire items.
     '''
+
+    __slots__ = ('_lifespan', '_serializer', '_connection', '_table', '__weakref__')
 
     def __init__(self, connection: sqlite3.Connection, serializer: Any, lifespan: timedelta, table: str = 'expiringsqlitedict') -> None:
         self._lifespan = lifespan.total_seconds()

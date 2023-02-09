@@ -11,15 +11,16 @@
 #  * http://code.activestate.com/recipes/526618/
 
 
-from collections.abc import Mapping, MutableMapping
-from contextlib import contextmanager, closing
-from datetime import timedelta
-from typing import Any, Iterator, Optional, Tuple, Union
 import json
 import pickle
 import sqlite3
 import zlib
+from collections.abc import MutableMapping
+from contextlib import closing, contextmanager
+from datetime import timedelta
+from typing import Any, Iterator, Tuple
 from weakref import finalize
+
 
 class ZlibPickleSerializer:
     '''Serializer that pickles and optionally zlib-compresses data.
@@ -71,9 +72,24 @@ class SqliteDict:
     these to customize your connection, such as making it read-only.
     """
 
-    __slots__ = ('_db', '_serializer', '_lifespan', '_begin', '_table', '_finalizer', '__weakref__')
+    __slots__ = (
+        '_db',
+        '_serializer',
+        '_lifespan',
+        '_begin',
+        '_table',
+        '_finalizer',
+        '__weakref__'
+    )
 
-    def __init__(self, *args, serializer: Any = json, lifespan: timedelta = timedelta(weeks=1), transaction: str = 'IMMEDIATE', table: str = 'expiringsqlitedict', **kwargs) -> None:
+    def __init__(self,
+        *args,
+        serializer: Any = json,
+        lifespan: timedelta = timedelta(weeks=1),
+        transaction: str = 'IMMEDIATE',
+        table: str = 'expiringsqlitedict',
+        **kwargs,
+    ) -> None:
         self._db = sqlite3.connect(*args, isolation_level=None, **kwargs)
         with closing(self._db.cursor()) as cursor:
             cursor.execute('PRAGMA journal_mode=WAL')
@@ -131,7 +147,13 @@ def OnDemand(*args, **kwargs):
     with closing(manager), manager as connection:
         yield connection
 
-def AutocommitSqliteDict(*args, serializer: Any = json, lifespan: timedelta = timedelta(weeks=1), table: str = 'expiringsqlitedict', **kwargs) -> 'Connection':
+def AutocommitSqliteDict(
+    *args,
+    serializer: Any = json,
+    lifespan: timedelta = timedelta(weeks=1),
+    table: str = 'expiringsqlitedict',
+    **kwargs,
+) -> 'Connection':
     """
     Set up the sqlite dictionary manager as a non-contextmanager in autocommit mode.
     """
@@ -155,12 +177,18 @@ def AutocommitSqliteDict(*args, serializer: Any = json, lifespan: timedelta = ti
 class Connection(MutableMapping):
     '''The actual connection object, as a MutableMapping[str, Any].
 
-    Items are expired when a value is inserted or updated.  Deletion or postponement does not expire items.
+    Items are expired when a value is inserted or updated.  Deletion or
+    postponement does not expire items.
     '''
 
     __slots__ = ('_lifespan', '_serializer', '_connection', '_table', '__weakref__')
 
-    def __init__(self, connection: sqlite3.Connection, serializer: Any, lifespan: timedelta, table: str = 'expiringsqlitedict') -> None:
+    def __init__(self,
+        connection: sqlite3.Connection,
+        serializer: Any,
+        lifespan: timedelta,
+        table: str = 'expiringsqlitedict',
+    ) -> None:
         self._lifespan = lifespan.total_seconds()
         self._serializer = serializer
         self._connection = connection
@@ -172,7 +200,9 @@ class Connection(MutableMapping):
                 expire INTEGER NOT NULL,
                 value BLOB NOT NULL) WITHOUT ROWID
             ''')
-            cursor.execute(f'CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON {table} (expire)')
+            cursor.execute(
+                f'CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON {table} (expire)'
+            )
 
             cursor.execute(
                 f'''
@@ -260,7 +290,9 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT value FROM {self._table} WHERE key = ?', (key,)):
+            for row in cursor.execute(
+                f'SELECT value FROM {self._table} WHERE key = ?', (key,)
+            ):
                 return self._serializer.loads(row[0])
         raise KeyError(key)
 
@@ -299,7 +331,7 @@ class Connection(MutableMapping):
             cursor.execute(
                 f"UPDATE {self._table} SET expire=strftime('%s', 'now') + ? WHERE key=?",
                 (self._lifespan, key),
-                )
+            )
 
     def postpone_all(self) -> None:
         '''Push back the expiration date of all entries at once.
@@ -308,4 +340,4 @@ class Connection(MutableMapping):
             cursor.execute(
                 f"UPDATE {self._table} SET expire=strftime('%s', 'now') + ?",
                 (self._lifespan,),
-                )
+            )

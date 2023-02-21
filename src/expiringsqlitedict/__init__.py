@@ -194,12 +194,16 @@ class Connection(MutableMapping):
         self._connection = connection
         self._table = table
         with closing(self._connection.cursor()) as cursor:
-            cursor.execute(f'''
+            create_statement = f'''
             CREATE TABLE IF NOT EXISTS {table} (
                 key TEXT PRIMARY KEY NOT NULL,
                 expire INTEGER NOT NULL,
-                value BLOB NOT NULL) WITHOUT ROWID
-            ''')
+                value BLOB NOT NULL)'''
+
+            if sqlite3.sqlite_version_info >= (3, 8, 2):
+                create_statement += ' WITHOUT ROWID'
+
+            cursor.execute(create_statement)
             cursor.execute(
                 f'CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON {table} (expire)'
             )

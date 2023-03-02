@@ -20,7 +20,7 @@ from contextlib import closing, contextmanager
 from datetime import timedelta
 from typing import Any, Iterator, Tuple
 from weakref import finalize
-
+from functools import wraps
 
 class ZlibPickleSerializer:
     '''Serializer that pickles and optionally zlib-compresses data.
@@ -138,6 +138,7 @@ class SqliteDict:
 
         self._finalizer()
 
+@wraps(SqliteDict)
 @contextmanager
 def OnDemand(*args, **kwargs):
     '''A wrapper around a database that is a context-manager that opens the
@@ -181,21 +182,30 @@ class Connection(MutableMapping):
     postponement does not expire items.
     '''
 
-    __slots__ = ('_lifespan', '_serializer', '_connection', '_table', '__weakref__')
+    __slots__ = (
+        '_lifespan',
+        '_serializer',
+        '_connection',
+        '_table',
+        '_safe_table',
+        '__weakref__',
+    )
 
     def __init__(self,
         connection: sqlite3.Connection,
-        serializer: Any,
-        lifespan: timedelta,
+        serializer: Any = json,
+        lifespan: timedelta = timedelta(weeks=1),
         table: str = 'expiringsqlitedict',
     ) -> None:
         self._lifespan = lifespan.total_seconds()
         self._serializer = serializer
         self._connection = connection
         self._table = table
+        self._safe_table = table.replace('"', '""')
+
         with closing(self._connection.cursor()) as cursor:
             create_statement = f'''
-            CREATE TABLE IF NOT EXISTS {table} (
+            CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
                 key TEXT PRIMARY KEY NOT NULL,
                 expire INTEGER NOT NULL,
                 value BLOB NOT NULL)'''
@@ -205,23 +215,23 @@ class Connection(MutableMapping):
 
             cursor.execute(create_statement)
             cursor.execute(
-                f'CREATE INDEX IF NOT EXISTS expiringsqlitedict_expire_index ON {table} (expire)'
+                f'CREATE INDEX IF NOT EXISTS "{self._safe_table}_expire_index" ON "{self._safe_table}" (expire)'
             )
 
             cursor.execute(
                 f'''
-                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_insert_trigger AFTER INSERT ON {table}
+                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger" AFTER INSERT ON "{self._safe_table}"
                 BEGIN
-                    DELETE FROM {table} WHERE expire <= strftime('%s', 'now');
+                    DELETE FROM "{self._safe_table}" WHERE expire <= strftime('%s', 'now');
                 END
                 '''
             )
 
             cursor.execute(
                 f'''
-                CREATE TRIGGER IF NOT EXISTS expiringsqlitedict_update_trigger AFTER UPDATE OF value ON {table}
+                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger" AFTER UPDATE OF value ON "{self._safe_table}"
                 BEGIN
-                    DELETE FROM {table} WHERE expire <= strftime('%s', 'now');
+                    DELETE FROM "{self._safe_table}" WHERE expire <= strftime('%s', 'now');
                 END
                 '''
             )
@@ -245,7 +255,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT COUNT(*) FROM {self._table}'):
+            for row in cursor.execute(f'SELECT COUNT(*) FROM "{self._safe_table}"'):
                 return row[0]
         return 0
 
@@ -259,7 +269,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT key FROM {self._table}'):
+            for row in cursor.execute(f'SELECT key FROM "{self._safe_table}"'):
                 yield row[0]
 
     __iter__ = keys
@@ -269,7 +279,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT value FROM {self._table}'):
+            for row in cursor.execute(f'SELECT value FROM "{self._safe_table}"'):
                 yield self._serializer.loads(row[0])
 
     def items(self) -> Iterator[Tuple[str, Any]]:
@@ -277,7 +287,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT key, value FROM {self._table}'):
+            for row in cursor.execute(f'SELECT key, value FROM "{self._safe_table}"'):
                 yield row[0], self._serializer.loads(row[1])
 
     def __contains__(self, key: str) -> bool:
@@ -285,7 +295,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for _ in cursor.execute(f'SELECT 1 FROM {self._table} WHERE key = ?', (key,)):
+            for _ in cursor.execute(f'SELECT 1 FROM "{self._safe_table}" WHERE key = ?', (key,)):
                 return True
         return False
 
@@ -295,7 +305,7 @@ class Connection(MutableMapping):
 
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(
-                f'SELECT value FROM {self._table} WHERE key = ?', (key,)
+                f'SELECT value FROM "{self._safe_table}" WHERE key = ?', (key,)
             ):
                 return self._serializer.loads(row[0])
         raise KeyError(key)
@@ -308,7 +318,7 @@ class Connection(MutableMapping):
 
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f"REPLACE INTO {self._table} (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
+                f'REPLACE INTO "{self._safe_table}"' " (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
                 (key, self._lifespan, self._serializer.dumps(value)),
                 )
 
@@ -319,21 +329,21 @@ class Connection(MutableMapping):
         if key not in self:
             raise KeyError(key)
         with closing(self._connection.cursor()) as cursor:
-            cursor.execute(f'DELETE FROM {self._table} WHERE key=?', (key,))
+            cursor.execute(f'DELETE FROM "{self._safe_table}" WHERE key=?', (key,))
 
     def clear(self) -> None:
         '''Delete all items from the table.
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            cursor.execute(f'DELETE FROM {self._table}')
+            cursor.execute(f'DELETE FROM "{self._safe_table}"')
 
     def postpone(self, key: str) -> None:
         '''Push back the expiration date of the given entry, if it exists.
         '''
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f"UPDATE {self._table} SET expire=strftime('%s', 'now') + ? WHERE key=?",
+                f'UPDATE "{self._safe_table}"' " SET expire=strftime('%s', 'now') + ? WHERE key=?",
                 (self._lifespan, key),
             )
 
@@ -342,6 +352,6 @@ class Connection(MutableMapping):
         '''
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f"UPDATE {self._table} SET expire=strftime('%s', 'now') + ?",
+                f'UPDATE "{self._safe_table}"' " SET expire=strftime('%s', 'now') + ?",
                 (self._lifespan,),
             )

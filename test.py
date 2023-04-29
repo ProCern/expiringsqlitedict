@@ -8,7 +8,7 @@ from datetime import timedelta
 from tempfile import TemporaryDirectory
 import time
 from pathlib import Path
-from expiringsqlitedict import SqliteDict, AutocommitSqliteDict, ZlibPickleSerializer, OnDemand
+from expiringsqlitedict import SqliteDict, SimpleSqliteDict
 from typing import Any
 import json
 import marshal
@@ -19,7 +19,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with OnDemand(str(db_path), serializer=ZlibPickleSerializer) as d:
+            with SqliteDict(str(db_path)) as d:
                 self.assertFalse(bool(d))
                 self.assertEqual(set(d), set())
                 self.assertEqual(set(d.keys()), set())
@@ -29,7 +29,7 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
-            with SqliteDict(str(db_path), serializer=ZlibPickleSerializer) as d:
+            with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'foo', 'baz'})
                 self.assertEqual(set(d.keys()), {'foo', 'baz'})
@@ -41,7 +41,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with OnDemand(str(db_path), table = 'Name\\with"special\t-_ char""ac"""ters') as d:
+            with SqliteDict(str(db_path), table = 'Name\\with"special\t-_ char""ac"""ters') as d:
                 self.assertFalse(bool(d))
                 self.assertEqual(set(d), set())
                 self.assertEqual(set(d.keys()), set())
@@ -63,7 +63,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            d = AutocommitSqliteDict(str(db_path))
+            d = SimpleSqliteDict(str(db_path))
             self.assertFalse(bool(d))
             self.assertEqual(set(d), set())
             self.assertEqual(set(d.keys()), set())
@@ -73,13 +73,37 @@ class TestExpiringDict(unittest.TestCase):
             d['foo'] = 'bar'
             d['baz'] = 1337
 
-            d = AutocommitSqliteDict(str(db_path))
+            d = SimpleSqliteDict(str(db_path))
             self.assertTrue(bool(d))
             self.assertEqual(set(d), {'foo', 'baz'})
             self.assertEqual(set(d.keys()), {'foo', 'baz'})
             self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
             self.assertEqual(set(d.values()), {'bar', 1337})
             self.assertEqual(len(d), 2)
+
+    def test_isolation_level(self):
+        with TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / 'test.db'
+
+            d = SimpleSqliteDict(str(db_path), isolation_level='DEFERRED')
+            self.assertFalse(bool(d))
+            self.assertEqual(set(d), set())
+            self.assertEqual(set(d.keys()), set())
+            self.assertEqual(set(d.items()), set())
+            self.assertEqual(set(d.values()), set())
+            self.assertEqual(len(d), 0)
+            d['foo'] = 'bar'
+            d.connection.commit()
+            d['baz'] = 1337
+            d.connection.rollback()
+
+            d = SimpleSqliteDict(str(db_path))
+            self.assertTrue(bool(d))
+            self.assertEqual(set(d), {'foo'})
+            self.assertEqual(set(d.keys()), {'foo'})
+            self.assertEqual(set(d.items()), {('foo', 'bar')})
+            self.assertEqual(set(d.values()), {'bar'})
+            self.assertEqual(len(d), 1)
 
     def test_nested(self):
         with TemporaryDirectory() as temporary_directory:

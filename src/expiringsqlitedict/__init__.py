@@ -15,46 +15,13 @@ import json
 import pickle
 import sqlite3
 import zlib
+from time import time
 from collections.abc import MutableMapping
 from contextlib import closing, contextmanager
 from datetime import timedelta
-from typing import Any, Iterator, Tuple
+from typing import Any, Iterator, Optional, Tuple, Type, Union
 from weakref import finalize
 from functools import wraps
-
-class ZlibPickleSerializer:
-    '''Serializer that pickles and optionally zlib-compresses data.
-    '''
-
-    __slots__ = ()
-
-    @staticmethod
-    def dumps(value: Any) -> bytes:
-        """Serialize an object using pickle to a binary format accepted by SQLite."""
-
-        pickled = pickle.dumps(value)
-        compressed = zlib.compress(pickled)
-
-        # If compression didn't fail to save space:
-        if len(compressed) < len(pickled):
-            data = b'Z' + compressed
-        else:
-            data = b'R' + pickled
-
-        return data
-
-    @staticmethod
-    def loads(data: bytes) -> Any:
-        """Deserialize objects retrieved from SQLite."""
-        flag = data[0:1]
-        data = data[1:]
-
-        if flag == b'Z':
-            pickled = zlib.decompress(data)
-        else:
-            pickled = data
-
-        return pickle.loads(pickled)
 
 def _close(db):
     '''Optimize and close the database.
@@ -70,15 +37,19 @@ class SqliteDict:
     This needs to be used as a context manager.  It will not operate at all
     otherwise. args and kwargs are directly passed to sqlite3.connect.  Use
     these to customize your connection, such as making it read-only.
+
+    This is lazy, and won't even open the database until it is entered.  It may
+    be re-opened after it has closed.
     """
 
     __slots__ = (
-        '_db',
+        '_args',
+        '_kwargs',
+        '_connection',
         '_serializer',
         '_lifespan',
         '_begin',
         '_table',
-        '_finalizer',
         '__weakref__'
     )
 
@@ -90,15 +61,12 @@ class SqliteDict:
         table: str = 'expiringsqlitedict',
         **kwargs,
     ) -> None:
-        self._db = sqlite3.connect(*args, isolation_level=None, **kwargs)
-        with closing(self._db.cursor()) as cursor:
-            cursor.execute('PRAGMA journal_mode=WAL')
-            cursor.execute('PRAGMA synchronous=NORMAL')
+        self._args = args
+        self._kwargs = kwargs
         self._serializer = serializer
         self._lifespan = lifespan
         self._begin = f'BEGIN {transaction} TRANSACTION'
         self._table = table
-        self._finalizer = finalize(self, _close, self._db)
 
     @property
     def lifespan(self) -> timedelta:
@@ -115,51 +83,54 @@ class SqliteDict:
         self._lifespan = value
 
     def __enter__(self) -> 'Connection':
-        with closing(self._db.cursor()) as cursor:
+        self._connection = sqlite3.connect(
+            *self._args,
+            isolation_level=None,
+            **self._kwargs,
+        )
+        with closing(self._connection.cursor()) as cursor:
+            cursor.execute('PRAGMA journal_mode=WAL')
+            cursor.execute('PRAGMA synchronous=NORMAL')
             cursor.execute(self._begin)
 
         return Connection(
-            self._db,
+            self._connection,
             serializer=self._serializer,
             lifespan=self._lifespan,
             table=self._table,
         )
 
-    def __exit__(self, type, value, traceback) -> None:
-        if (type and value and traceback) is None:
-            with closing(self._db.cursor()) as cursor:
+    def __exit__(
+        self,
+        type: Optional[Type[BaseException]],
+        value: Optional[BaseException],
+        traceback: Optional[BaseException],
+    ) -> None:
+        with closing(self._connection) as db, closing(db.cursor()) as cursor:
+            if (type and value and traceback) is None:
                 cursor.execute('COMMIT')
-        else:
-            with closing(self._db.cursor()) as cursor:
+            else:
                 cursor.execute('ROLLBACK')
 
-    def close(self):
-        '''Close and optimize the database.'''
+            cursor.execute('PRAGMA analysis_limit=8192')
+            cursor.execute('PRAGMA optimize')
 
-        self._finalizer()
-
-@wraps(SqliteDict)
-@contextmanager
-def OnDemand(*args, **kwargs):
-    '''A wrapper around a database that is a context-manager that opens the
-    database on-demand and closes it immediately when finished with it.
-    '''
-    manager = SqliteDict(*args, **kwargs)
-    with closing(manager), manager as connection:
-        yield connection
-
-def AutocommitSqliteDict(
+def SimpleSqliteDict(
     *args,
     serializer: Any = json,
     lifespan: timedelta = timedelta(weeks=1),
+    isolation_level: Optional[str] = None,
     table: str = 'expiringsqlitedict',
     **kwargs,
 ) -> 'Connection':
     """
-    Set up the sqlite dictionary manager as a non-contextmanager in autocommit mode.
+    Set up the sqlite dictionary manager as a non-contextmanager with a finalizer.
+
+    If you set the isolation_level, you will be responsible for calling
+    d.connection.commit() and d.connection.rollback() appropriately.
     """
 
-    db = sqlite3.connect(*args, isolation_level=None, **kwargs)
+    db = sqlite3.connect(*args, isolation_level=isolation_level, **kwargs)
     with closing(db.cursor()) as cursor:
         cursor.execute('PRAGMA journal_mode=WAL')
         cursor.execute('PRAGMA synchronous=NORMAL')
@@ -174,6 +145,22 @@ def AutocommitSqliteDict(
     finalize(connection, _close, db)
 
     return connection
+
+if sqlite3.sqlite_version_info >= (3, 8, 2):
+    _create_table_trailer = ' WITHOUT ROWID'
+else:
+    _create_table_trailer = ''
+
+if sqlite3.sqlite_version_info >= (3, 37):
+    _create_table_trailer += ' STRICT'
+    _valuetype = 'ANY' 
+else:
+    _valuetype = 'BLOB' 
+
+if sqlite3.sqlite_version_info >= (3, 38):
+    _unixepoch = 'UNIXEPOCH()'
+else:
+    _unixepoch = "CAST(strftime('%s', 'now') AS INTEGER)"
 
 class Connection(MutableMapping):
     '''The actual connection object, as a MutableMapping[str, Any].
@@ -208,10 +195,8 @@ class Connection(MutableMapping):
             CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
                 key TEXT PRIMARY KEY NOT NULL,
                 expire INTEGER NOT NULL,
-                value BLOB NOT NULL)'''
+                value {_valuetype} NOT NULL){_create_table_trailer}'''
 
-            if sqlite3.sqlite_version_info >= (3, 8, 2):
-                create_statement += ' WITHOUT ROWID'
 
             cursor.execute(create_statement)
             cursor.execute(
@@ -222,7 +207,7 @@ class Connection(MutableMapping):
                 f'''
                 CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger" AFTER INSERT ON "{self._safe_table}"
                 BEGIN
-                    DELETE FROM "{self._safe_table}" WHERE expire <= strftime('%s', 'now');
+                    DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
                 END
                 '''
             )
@@ -231,10 +216,13 @@ class Connection(MutableMapping):
                 f'''
                 CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger" AFTER UPDATE OF value ON "{self._safe_table}"
                 BEGIN
-                    DELETE FROM "{self._safe_table}" WHERE expire <= strftime('%s', 'now');
+                    DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
                 END
                 '''
             )
+    @property
+    def connection(self) -> sqlite3.Connection:
+        return self._connection
 
     @property
     def lifespan(self) -> timedelta:
@@ -318,7 +306,7 @@ class Connection(MutableMapping):
 
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f'REPLACE INTO "{self._safe_table}"' " (key, expire, value) VALUES (?, strftime('%s', 'now') + ?, ?)",
+                f'REPLACE INTO "{self._safe_table}" (key, expire, value) VALUES (?, {_unixepoch} + ?, ?)',
                 (key, self._lifespan, self._serializer.dumps(value)),
                 )
 
@@ -343,7 +331,7 @@ class Connection(MutableMapping):
         '''
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f'UPDATE "{self._safe_table}"' " SET expire=strftime('%s', 'now') + ? WHERE key=?",
+                f'UPDATE "{self._safe_table}" SET expire={_unixepoch} + ? WHERE key=?',
                 (self._lifespan, key),
             )
 
@@ -352,6 +340,6 @@ class Connection(MutableMapping):
         '''
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f'UPDATE "{self._safe_table}"' " SET expire=strftime('%s', 'now') + ?",
+                f'UPDATE "{self._safe_table}" SET expire={_unixepoch} + ?',
                 (self._lifespan,),
             )

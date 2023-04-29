@@ -45,8 +45,10 @@ Features
   managed by sqlite itself.
 * A very simple codebase that is easy to read, relying on sqlite for as much
   behavior as possible.
-* A simple autocommit wrapper (``AutocommitSqliteDict``), if you really can't
+* A simple autocommit wrapper (``SimpleSqliteDict``), if you really can't
   handle a context manager and need something that fully handles like a dict.
+  You can specify a ``isolation_level`` on this to have to commit and roll back
+  yourself.
 * An on-demand wrapper (``OnDemand``), for situations where you want to open and
   close the database in as narrow a window as possible.
 * Support for custom serialization or compression:

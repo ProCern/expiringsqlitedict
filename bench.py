@@ -6,7 +6,6 @@ from timeit import Timer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from expiringsqlitedict import SqliteDict
-import gc
 population = string.ascii_letters + string.digits + string.punctuation
 
 with TemporaryDirectory() as dir:

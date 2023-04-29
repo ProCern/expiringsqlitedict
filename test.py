@@ -6,10 +6,8 @@
 import unittest
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-import time
 from pathlib import Path
 from expiringsqlitedict import SqliteDict, SimpleSqliteDict
-from typing import Any
 import json
 import marshal
 import pickle
@@ -41,7 +39,10 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path), table = 'Name\\with"special\t-_ char""ac"""ters') as d:
+            with SqliteDict(
+                str(db_path),
+                table = 'Name\\with"special\t-_ char""ac"""ters',
+            ) as d:
                 self.assertFalse(bool(d))
                 self.assertEqual(set(d), set())
                 self.assertEqual(set(d.keys()), set())
@@ -51,7 +52,10 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
-            with SqliteDict(str(db_path), table = 'Name\\with"special\t-_ char""ac"""ters') as d:
+            with SqliteDict(
+                str(db_path),
+                table = 'Name\\with"special\t-_ char""ac"""ters',
+            ) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'foo', 'baz'})
                 self.assertEqual(set(d.keys()), {'foo', 'baz'})
@@ -165,7 +169,10 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'baz', 'postponed'})
                 self.assertEqual(set(d.keys()), {'baz', 'postponed'})
-                self.assertEqual(set(d.items()), {('baz', 1337), ('postponed', 'worked')})
+                self.assertEqual(
+                    set(d.items()),
+                    {('baz', 1337), ('postponed', 'worked')},
+                )
                 self.assertEqual(set(d.values()), {1337, 'worked'})
                 self.assertEqual(len(d), 2)
 

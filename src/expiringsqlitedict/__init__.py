@@ -12,16 +12,12 @@
 
 
 import json
-import pickle
 import sqlite3
-import zlib
-from time import time
 from collections.abc import MutableMapping
-from contextlib import closing, contextmanager
+from contextlib import closing
 from datetime import timedelta
-from typing import Any, Iterator, Optional, Tuple, Type, Union
+from typing import Any, Iterator, Optional, Tuple, Type
 from weakref import finalize
-from functools import wraps
 
 def _close(db):
     '''Optimize and close the database.
@@ -200,12 +196,14 @@ class Connection(MutableMapping):
 
             cursor.execute(create_statement)
             cursor.execute(
-                f'CREATE INDEX IF NOT EXISTS "{self._safe_table}_expire_index" ON "{self._safe_table}" (expire)'
+                f'CREATE INDEX IF NOT EXISTS "{self._safe_table}_expire_index"'
+                f' ON "{self._safe_table}" (expire)'
             )
 
             cursor.execute(
                 f'''
-                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger" AFTER INSERT ON "{self._safe_table}"
+                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger"'''
+                f''' AFTER INSERT ON "{self._safe_table}"
                 BEGIN
                     DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
                 END
@@ -214,7 +212,8 @@ class Connection(MutableMapping):
 
             cursor.execute(
                 f'''
-                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger" AFTER UPDATE OF value ON "{self._safe_table}"
+                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger"'''
+                f''' AFTER UPDATE OF value ON "{self._safe_table}"
                 BEGIN
                     DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
                 END
@@ -283,7 +282,10 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for _ in cursor.execute(f'SELECT 1 FROM "{self._safe_table}" WHERE key = ?', (key,)):
+            for _ in cursor.execute(
+                f'SELECT 1 FROM "{self._safe_table}" WHERE key = ?',
+                (key,),
+            ):
                 return True
         return False
 
@@ -306,7 +308,8 @@ class Connection(MutableMapping):
 
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f'REPLACE INTO "{self._safe_table}" (key, expire, value) VALUES (?, {_unixepoch} + ?, ?)',
+                f'REPLACE INTO "{self._safe_table}" (key, expire, value)'
+                f'VALUES (?, {_unixepoch} + ?, ?)',
                 (key, self._lifespan, self._serializer.dumps(value)),
                 )
 

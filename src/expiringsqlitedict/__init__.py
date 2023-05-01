@@ -142,16 +142,17 @@ def SimpleSqliteDict(
 
     return connection
 
+_trailers = []
 if sqlite3.sqlite_version_info >= (3, 8, 2):
-    _create_table_trailer = ' WITHOUT ROWID'
-else:
-    _create_table_trailer = ''
+    _trailers.append('WITHOUT ROWID')
 
 if sqlite3.sqlite_version_info >= (3, 37):
-    _create_table_trailer += ' STRICT'
-    _valuetype = 'ANY' 
+    _trailers.append('STRICT')
+    _valuetype = 'ANY'
 else:
-    _valuetype = 'BLOB' 
+    _valuetype = 'BLOB'
+
+_trailer = ', '.join(_trailers)
 
 if sqlite3.sqlite_version_info >= (3, 38):
     _unixepoch = 'UNIXEPOCH()'
@@ -191,7 +192,7 @@ class Connection(MutableMapping):
             CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
                 key TEXT PRIMARY KEY NOT NULL,
                 expire INTEGER NOT NULL,
-                value {_valuetype} NOT NULL){_create_table_trailer}'''
+                value {_valuetype} NOT NULL){_trailer}'''
 
 
             cursor.execute(create_statement)

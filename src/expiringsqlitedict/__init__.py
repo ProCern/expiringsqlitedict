@@ -17,7 +17,7 @@ from collections.abc import MutableMapping
 from contextlib import ExitStack, closing, contextmanager
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Generator, Iterator, Optional, Reversible, Tuple, Type
+from typing import Any, Generator, Iterable, Iterator, Optional, Reversible, Tuple, Type
 from weakref import finalize
 
 @contextmanager
@@ -37,57 +37,38 @@ def _transaction(
         with closing(connection.cursor()) as cursor:
             cursor.execute('COMMIT')
 
-class _KeysIterator(Iterator[str], Reversible):
+class _Keys(Reversible, Iterable[str]):
     __slots__ = (
         '_connection',
         '_table',
-        '_cursor',
-        '_reversed',
-        '_order',
     )
 
     def __init__(
         self,
         connection: sqlite3.Connection,
         table: str,
-        reversed: bool = False,
     ) -> None:
+
         self._connection = connection
         self._table = table
-        self._cursor: Optional[sqlite3.Cursor] = None
-        self._reversed = reversed
 
-    def __iter__(self) -> '_KeysIterator':
-        return self
-
-    def __reversed__(self) -> '_KeysIterator':
-        return _KeysIterator(
-            connection=self._connection,
-            table=self._table,
-            reversed=not self._reversed,
-        )
-
-    def __next__(self) -> str:
-        if self._cursor is None:
-            self._cursor = self._connection.cursor()
-            order = 'DESC' if self._reversed else 'ASC'
-            self._cursor.execute(
+    def _iterator(self, order: str) -> Iterator[str]:
+        with closing(self._connection.cursor()) as cursor:
+            for row in cursor.execute(
                 f'SELECT key FROM "{self._table}" ORDER BY id {order}',
-            )
-        try:
-            row = next(self._cursor)
-            return row[0]
-        except StopIteration:
-            self._cursor.close()
-            raise
+            ):
+                yield row[0]
 
-class _ValuesIterator(Iterator[Any], Reversible):
+    def __iter__(self) -> Iterator[str]:
+        return self._iterator('ASC')
+
+    def __reversed__(self) -> Iterator[str]:
+        return self._iterator('DESC')
+
+class _Values(Reversible, Iterable[Any]):
     __slots__ = (
         '_connection',
         '_table',
-        '_cursor',
-        '_reversed',
-        '_order',
         '_serializer',
     )
 
@@ -96,46 +77,29 @@ class _ValuesIterator(Iterator[Any], Reversible):
         connection: sqlite3.Connection,
         table: str,
         serializer: Any,
-        reversed: bool = False,
     ) -> None:
+
         self._connection = connection
         self._table = table
-        self._cursor: Optional[sqlite3.Cursor] = None
-        self._reversed = reversed
         self._serializer = serializer
 
-    def __iter__(self) -> '_ValuesIterator':
-        return self
-
-    def __reversed__(self) -> '_ValuesIterator':
-        return _ValuesIterator(
-            connection=self._connection,
-            table=self._table,
-            serializer=self._serializer,
-            reversed=not self._reversed,
-        )
-
-    def __next__(self) -> Any:
-        if self._cursor is None:
-            self._cursor = self._connection.cursor()
-            order = 'DESC' if self._reversed else 'ASC'
-            self._cursor.execute(
+    def _iterator(self, order: str) -> Iterator[Any]:
+        with closing(self._connection.cursor()) as cursor:
+            for row in cursor.execute(
                 f'SELECT value FROM "{self._table}" ORDER BY id {order}',
-            )
-        try:
-            row = next(self._cursor)
-            return self._serializer.loads(row[0])
-        except StopIteration:
-            self._cursor.close()
-            raise
+            ):
+                yield self._serializer.loads(row[0])
 
-class _ItemsIterator(Iterator[Tuple[str, Any]], Reversible):
+    def __iter__(self) -> Iterator[Any]:
+        return self._iterator('ASC')
+
+    def __reversed__(self) -> Iterator[Any]:
+        return self._iterator('DESC')
+
+class _Items(Reversible, Iterable[Tuple[str, Any]]):
     __slots__ = (
         '_connection',
         '_table',
-        '_cursor',
-        '_reversed',
-        '_order',
         '_serializer',
     )
 
@@ -144,40 +108,23 @@ class _ItemsIterator(Iterator[Tuple[str, Any]], Reversible):
         connection: sqlite3.Connection,
         table: str,
         serializer: Any,
-        reversed: bool = False,
     ) -> None:
         self._connection = connection
         self._table = table
-        self._cursor: Optional[sqlite3.Cursor] = None
-        self._reversed = reversed
         self._serializer = serializer
 
-    def __iter__(self) -> '_ItemsIterator':
-        return self
-
-    def __reversed__(self) -> '_ItemsIterator':
-        return _ItemsIterator(
-            connection=self._connection,
-            table=self._table,
-            serializer=self._serializer,
-            reversed=not self._reversed,
-        )
-
-    def __next__(self) -> Tuple[str, Any]:
-        if self._cursor is None:
-            self._cursor = self._connection.cursor()
-            order = 'DESC' if self._reversed else 'ASC'
-            self._cursor.execute(
+    def _iterator(self, order: str) -> Iterator[Tuple[str, Any]]:
+        with closing(self._connection.cursor()) as cursor:
+            for row in cursor.execute(
                 f'SELECT key, value FROM "{self._table}" ORDER BY id {order}',
-            )
-        try:
-            row = next(self._cursor)
-            return row[0], self._serializer.loads(row[1])
-        except StopIteration:
-            self._cursor.close()
-            raise
+            ):
+                yield row[0], self._serializer.loads(row[1])
 
-        
+    def __iter__(self) -> Iterator[Tuple[str, Any]]:
+        return self._iterator('ASC')
+
+    def __reversed__(self) -> Iterator[Tuple[str, Any]]:
+        return self._iterator('DESC')
 
 class SqliteDict:
     """
@@ -423,39 +370,36 @@ class Connection(MutableMapping):
 
         return len(self) > 0
 
-    def keys(self) -> _KeysIterator:
+    def keys(self) -> _Keys:
         '''Iterate over keys in the table.
         '''
 
-        return _KeysIterator(
+        return _Keys(
             connection=self._connection,
             table=self._safe_table,
         )
 
-    __iter__ = keys
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.keys())
 
-    def __reversed__(self) -> _KeysIterator:
-        return _KeysIterator(
-            connection=self._connection,
-            table=self._safe_table,
-            reversed=True,
-        )
+    def __reversed__(self) -> Iterator[str]:
+        return reversed(self.keys())
 
-    def values(self) -> _ValuesIterator:
+    def values(self) -> _Values:
         '''Iterate over values in the table.
         '''
 
-        return _ValuesIterator(
+        return _Values(
             connection=self._connection,
             table=self._safe_table,
             serializer=self._serializer,
         )
 
-    def items(self) -> _ItemsIterator:
+    def items(self) -> _Items:
         '''Iterate over keys and values in the table.
         '''
 
-        return _ItemsIterator(
+        return _Items(
             connection=self._connection,
             table=self._safe_table,
             serializer=self._serializer,

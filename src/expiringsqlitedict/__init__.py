@@ -172,8 +172,6 @@ def SimpleSqliteDict(
     return connection
 
 _trailers = []
-if sqlite3.sqlite_version_info >= (3, 8, 2):
-    _trailers.append('WITHOUT ROWID')
 
 if sqlite3.sqlite_version_info >= (3, 37):
     _trailers.append('STRICT')
@@ -219,7 +217,8 @@ class Connection(MutableMapping):
         with closing(self._connection.cursor()) as cursor:
             create_statement = f'''
             CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
-                key TEXT PRIMARY KEY NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                key TEXT UNIQUE NOT NULL,
                 expire INTEGER NOT NULL,
                 value {_valuetype} NOT NULL){_trailer}'''
 
@@ -286,7 +285,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT key FROM "{self._safe_table}"'):
+            for row in cursor.execute(f'SELECT key FROM "{self._safe_table}" ORDER BY id ASC'):
                 yield row[0]
 
     __iter__ = keys
@@ -296,7 +295,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT value FROM "{self._safe_table}"'):
+            for row in cursor.execute(f'SELECT value FROM "{self._safe_table}" ORDER BY id ASC'):
                 yield self._serializer.loads(row[0])
 
     def items(self) -> Iterator[Tuple[str, Any]]:
@@ -304,7 +303,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT key, value FROM "{self._safe_table}"'):
+            for row in cursor.execute(f'SELECT key, value FROM "{self._safe_table}" ORDER BY id ASC'):
                 yield row[0], self._serializer.loads(row[1])
 
     def __contains__(self, key: str) -> bool:

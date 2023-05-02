@@ -51,6 +51,45 @@ class TestExpiringDict(unittest.TestCase):
                 with SqliteDict(str(db_path)) as d:
                     del d['foo']
 
+    def test_simple_reentrant(self):
+        with TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / 'test.db'
+
+            manager = SqliteDict(str(db_path))
+
+            with manager as d:
+                self.assertFalse(bool(d))
+                self.assertEqual(set(d), set())
+                self.assertEqual(set(d.keys()), set())
+                self.assertEqual(set(d.items()), set())
+                self.assertEqual(set(d.values()), set())
+                self.assertEqual(len(d), 0)
+                d['foo'] = 'bar'
+                d['baz'] = 1337
+
+            with manager as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(set(d), {'foo', 'baz'})
+                self.assertEqual(set(d.keys()), {'foo', 'baz'})
+                self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
+                self.assertEqual(set(d.values()), {'bar', 1337})
+                self.assertEqual(len(d), 2)
+
+            with manager as d:
+                del d['foo']
+
+            with manager as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(set(d), {'baz'})
+                self.assertEqual(set(d.keys()), {'baz'})
+                self.assertEqual(set(d.items()), {('baz', 1337)})
+                self.assertEqual(set(d.values()), {1337})
+                self.assertEqual(len(d), 1)
+
+            with self.assertRaises(KeyError):
+                with manager as d:
+                    del d['foo']
+
     def test_quotes(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'

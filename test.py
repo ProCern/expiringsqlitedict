@@ -36,6 +36,14 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(tuple(d.values()), ('bar', 1337))
                 self.assertEqual(len(d), 2)
 
+                self.assertEqual(tuple(reversed(d)), ('baz', 'foo'))
+                self.assertEqual(tuple(reversed(d.keys())), ('baz', 'foo'))
+                self.assertEqual(
+                    tuple(reversed(d.items())),
+                    (('baz', 1337), ('foo', 'bar')),
+                )
+                self.assertEqual(tuple(reversed(d.values())), (1337, 'bar'))
+
             with SqliteDict(str(db_path)) as d:
                 d['foo'] = 'barbar'
 
@@ -54,7 +62,7 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('baz',))
                 self.assertEqual(tuple(d.keys()), ('baz',))
-                self.assertEqual(tuple(d.items()), (('baz', 1337)))
+                self.assertEqual(tuple(d.items()), (('baz', 1337),))
                 self.assertEqual(tuple(d.values()), (1337,))
                 self.assertEqual(len(d), 1)
 
@@ -144,7 +152,7 @@ class TestExpiringDict(unittest.TestCase):
             self.assertTrue(bool(d))
             self.assertEqual(tuple(d), ('foo',))
             self.assertEqual(tuple(d.keys()), ('foo',))
-            self.assertEqual(tuple(d.items()), (('foo', 'bar')))
+            self.assertEqual(tuple(d.items()), (('foo', 'bar'),))
             self.assertEqual(tuple(d.values()), ('bar',))
             self.assertEqual(len(d), 1)
 
@@ -216,13 +224,13 @@ class TestExpiringDict(unittest.TestCase):
 
             with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(tuple(d), ('baz', 'postponed'))
-                self.assertEqual(tuple(d.keys()), ('baz', 'postponed'))
+                self.assertEqual(tuple(d), ('postponed', 'baz'))
+                self.assertEqual(tuple(d.keys()), ('postponed', 'baz'))
                 self.assertEqual(
                     tuple(d.items()),
-                    (('baz', 1337), ('postponed', 'worked')),
+                    (('postponed', 'worked'), ('baz', 1337)),
                 )
-                self.assertEqual(tuple(d.values()), (1337, 'worked'))
+                self.assertEqual(tuple(d.values()), ('worked', 1337))
                 self.assertEqual(len(d), 2)
 
 if __name__ == '__main__':

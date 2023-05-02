@@ -17,7 +17,7 @@ from collections.abc import MutableMapping
 from contextlib import ExitStack, closing, contextmanager
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Generator, Iterator, Optional, Tuple, Type
+from typing import Any, Generator, Iterator, Optional, Reversible, Tuple, Type
 from weakref import finalize
 
 @contextmanager
@@ -36,6 +36,148 @@ def _transaction(
     else:
         with closing(connection.cursor()) as cursor:
             cursor.execute('COMMIT')
+
+class _KeysIterator(Iterator[str], Reversible):
+    __slots__ = (
+        '_connection',
+        '_table',
+        '_cursor',
+        '_reversed',
+        '_order',
+    )
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        reversed: bool = False,
+    ) -> None:
+        self._connection = connection
+        self._table = table
+        self._cursor: Optional[sqlite3.Cursor] = None
+        self._reversed = reversed
+
+    def __iter__(self) -> '_KeysIterator':
+        return self
+
+    def __reversed__(self) -> '_KeysIterator':
+        return _KeysIterator(
+            connection=self._connection,
+            table=self._table,
+            reversed=not self._reversed,
+        )
+
+    def __next__(self) -> str:
+        if self._cursor is None:
+            self._cursor = self._connection.cursor()
+            order = 'DESC' if self._reversed else 'ASC'
+            self._cursor.execute(
+                f'SELECT key FROM "{self._table}" ORDER BY id {order}',
+            )
+        try:
+            row = next(self._cursor)
+            return row[0]
+        except StopIteration:
+            self._cursor.close()
+            raise
+
+class _ValuesIterator(Iterator[Any], Reversible):
+    __slots__ = (
+        '_connection',
+        '_table',
+        '_cursor',
+        '_reversed',
+        '_order',
+        '_serializer',
+    )
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        serializer: Any,
+        reversed: bool = False,
+    ) -> None:
+        self._connection = connection
+        self._table = table
+        self._cursor: Optional[sqlite3.Cursor] = None
+        self._reversed = reversed
+        self._serializer = serializer
+
+    def __iter__(self) -> '_ValuesIterator':
+        return self
+
+    def __reversed__(self) -> '_ValuesIterator':
+        return _ValuesIterator(
+            connection=self._connection,
+            table=self._table,
+            serializer=self._serializer,
+            reversed=not self._reversed,
+        )
+
+    def __next__(self) -> Any:
+        if self._cursor is None:
+            self._cursor = self._connection.cursor()
+            order = 'DESC' if self._reversed else 'ASC'
+            self._cursor.execute(
+                f'SELECT value FROM "{self._table}" ORDER BY id {order}',
+            )
+        try:
+            row = next(self._cursor)
+            return self._serializer.loads(row[0])
+        except StopIteration:
+            self._cursor.close()
+            raise
+
+class _ItemsIterator(Iterator[Tuple[str, Any]], Reversible):
+    __slots__ = (
+        '_connection',
+        '_table',
+        '_cursor',
+        '_reversed',
+        '_order',
+        '_serializer',
+    )
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        serializer: Any,
+        reversed: bool = False,
+    ) -> None:
+        self._connection = connection
+        self._table = table
+        self._cursor: Optional[sqlite3.Cursor] = None
+        self._reversed = reversed
+        self._serializer = serializer
+
+    def __iter__(self) -> '_ItemsIterator':
+        return self
+
+    def __reversed__(self) -> '_ItemsIterator':
+        return _ItemsIterator(
+            connection=self._connection,
+            table=self._table,
+            serializer=self._serializer,
+            reversed=not self._reversed,
+        )
+
+    def __next__(self) -> Tuple[str, Any]:
+        if self._cursor is None:
+            self._cursor = self._connection.cursor()
+            order = 'DESC' if self._reversed else 'ASC'
+            self._cursor.execute(
+                f'SELECT key, value FROM "{self._table}" ORDER BY id {order}',
+            )
+        try:
+            row = next(self._cursor)
+            return row[0], self._serializer.loads(row[1])
+        except StopIteration:
+            self._cursor.close()
+            raise
+
+        
 
 class SqliteDict:
     """
@@ -215,24 +357,25 @@ class Connection(MutableMapping):
         self._safe_table = table.replace('"', '""')
 
         with closing(self._connection.cursor()) as cursor:
-            create_statement = f'''
-            CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
-                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                key TEXT UNIQUE NOT NULL,
-                expire INTEGER NOT NULL,
-                value {_valuetype} NOT NULL){_trailer}'''
 
 
-            cursor.execute(create_statement)
-            cursor.execute(
-                f'CREATE INDEX IF NOT EXISTS "{self._safe_table}_expire_index"'
-                f' ON "{self._safe_table}" (expire)'
-            )
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    key TEXT UNIQUE NOT NULL,
+                    expire INTEGER NOT NULL,
+                    value {_valuetype} NOT NULL){_trailer}
+            ''')
+
+            cursor.execute(f'''
+                CREATE INDEX IF NOT EXISTS "{self._safe_table}_expire_index"
+                 ON "{self._safe_table}" (expire)
+            ''')
 
             cursor.execute(
                 f'''
-                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger"'''
-                f''' AFTER INSERT ON "{self._safe_table}"
+                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger"
+                    AFTER INSERT ON "{self._safe_table}"
                 BEGIN
                     DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
                 END
@@ -241,8 +384,8 @@ class Connection(MutableMapping):
 
             cursor.execute(
                 f'''
-                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger"'''
-                f''' AFTER UPDATE OF value ON "{self._safe_table}"
+                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger"
+                    AFTER UPDATE OF value ON "{self._safe_table}"
                 BEGIN
                     DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
                 END
@@ -280,31 +423,43 @@ class Connection(MutableMapping):
 
         return len(self) > 0
 
-    def keys(self) -> Iterator[str]:
+    def keys(self) -> _KeysIterator:
         '''Iterate over keys in the table.
         '''
 
-        with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT key FROM "{self._safe_table}" ORDER BY id ASC'):
-                yield row[0]
+        return _KeysIterator(
+            connection=self._connection,
+            table=self._safe_table,
+        )
 
     __iter__ = keys
 
-    def values(self) -> Iterator[Any]:
+    def __reversed__(self) -> _KeysIterator:
+        return _KeysIterator(
+            connection=self._connection,
+            table=self._safe_table,
+            reversed=True,
+        )
+
+    def values(self) -> _ValuesIterator:
         '''Iterate over values in the table.
         '''
 
-        with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT value FROM "{self._safe_table}" ORDER BY id ASC'):
-                yield self._serializer.loads(row[0])
+        return _ValuesIterator(
+            connection=self._connection,
+            table=self._safe_table,
+            serializer=self._serializer,
+        )
 
-    def items(self) -> Iterator[Tuple[str, Any]]:
+    def items(self) -> _ItemsIterator:
         '''Iterate over keys and values in the table.
         '''
 
-        with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT key, value FROM "{self._safe_table}" ORDER BY id ASC'):
-                yield row[0], self._serializer.loads(row[1])
+        return _ItemsIterator(
+            connection=self._connection,
+            table=self._safe_table,
+            serializer=self._serializer,
+        )
 
     def __contains__(self, key: str) -> bool:
         '''Check if the table contains the given key.
@@ -336,10 +491,30 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            cursor.execute(
-                f'REPLACE INTO "{self._safe_table}" (key, expire, value)'
-                f'VALUES (?, {_unixepoch} + ?, ?)',
-                (key, self._lifespan, self._serializer.dumps(value)),
+            if sqlite3.sqlite_version_info >= (3, 24):
+                cursor.execute(f'''
+                        INSERT INTO "{self._safe_table}" (key, expire, value)
+                            VALUES (?, {_unixepoch} + ?, ?)
+                            ON CONFLICT (key) DO UPDATE
+                            SET value=excluded.value, expire=excluded.expire
+                    ''',
+                    (key, self._lifespan, self._serializer.dumps(value)),
+                )
+            elif key in self:
+                cursor.execute(f'''
+                        UPDATE "{self._safe_table}"
+                            SET expire={_unixepoch} + ?,
+                                value=?
+                            WHERE key=?
+                    ''',
+                    (self._lifespan, self._serializer.dumps(value), key),
+                )
+            else:
+                cursor.execute(f'''
+                        INSERT INTO "{self._safe_table}" (key, expire, value)
+                            VALUES (?, {_unixepoch} + ?, ?)
+                    ''',
+                    (key, self._lifespan, self._serializer.dumps(value)),
                 )
 
     def __delitem__(self, key: str) -> None:

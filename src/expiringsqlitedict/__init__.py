@@ -14,17 +14,28 @@
 import json
 import sqlite3
 from collections.abc import MutableMapping
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
 from datetime import timedelta
-from typing import Any, Iterator, Optional, Tuple, Type
+from types import TracebackType
+from typing import Any, Generator, Iterator, Optional, Tuple, Type
 from weakref import finalize
 
-def _close(db):
-    '''Optimize and close the database.
-    '''
-    with closing(db) as d, closing(d.cursor()) as cursor:
-        cursor.execute('PRAGMA analysis_limit=8192')
-        cursor.execute('PRAGMA optimize')
+@contextmanager
+def _transaction(
+    connection: sqlite3.Connection,
+    begin: str,
+) -> Generator[None, None, None]:
+    with closing(connection.cursor()) as cursor:
+        cursor.execute(begin)
+    try:
+        yield
+    except:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute('ROLLBACK')
+        raise
+    else:
+        with closing(connection.cursor()) as cursor:
+            cursor.execute('COMMIT')
 
 class SqliteDict:
     """
@@ -42,6 +53,7 @@ class SqliteDict:
         '_args',
         '_kwargs',
         '_connection',
+        '_exit_stack',
         '_serializer',
         '_lifespan',
         '_begin',
@@ -79,37 +91,47 @@ class SqliteDict:
         self._lifespan = value
 
     def __enter__(self) -> 'Connection':
-        self._connection = sqlite3.connect(
-            *self._args,
-            isolation_level=None,
-            **self._kwargs,
-        )
-        with closing(self._connection.cursor()) as cursor:
-            cursor.execute('PRAGMA journal_mode=WAL')
-            cursor.execute('PRAGMA synchronous=NORMAL')
-            cursor.execute(self._begin)
+        with ExitStack() as exit_stack:
+            self._connection = exit_stack.enter_context(closing(sqlite3.connect(
+                *self._args,
+                isolation_level=None,
+                **self._kwargs,
+            )))
 
-        return Connection(
-            self._connection,
-            serializer=self._serializer,
-            lifespan=self._lifespan,
-            table=self._table,
-        )
+            with closing(self._connection.cursor()) as cursor:
+                cursor.execute('PRAGMA journal_mode=WAL')
+                cursor.execute('PRAGMA synchronous=NORMAL')
+
+            def optimize() -> None:
+                with closing(self._connection.cursor()) as cursor:
+                    cursor.execute('PRAGMA analysis_limit=8192')
+                    cursor.execute('PRAGMA optimize')
+
+            exit_stack.callback(optimize)
+
+            exit_stack.enter_context(_transaction(self._connection, self._begin))
+
+            connection = Connection(
+                self._connection,
+                serializer=self._serializer,
+                lifespan=self._lifespan,
+                table=self._table,
+            )
+            self._exit_stack = exit_stack.pop_all()
+            return connection
+
+        assert False, 'UNREACHABLE'
 
     def __exit__(
         self,
         type: Optional[Type[BaseException]],
         value: Optional[BaseException],
-        traceback: Optional[BaseException],
-    ) -> None:
-        with closing(self._connection) as db, closing(db.cursor()) as cursor:
-            if (type and value and traceback) is None:
-                cursor.execute('COMMIT')
-            else:
-                cursor.execute('ROLLBACK')
-
-            cursor.execute('PRAGMA analysis_limit=8192')
-            cursor.execute('PRAGMA optimize')
+        traceback: Optional[TracebackType],
+    ) -> bool:
+        try:
+            return self._exit_stack.__exit__(type, value, traceback)
+        finally:
+            del self._connection, self._exit_stack
 
 def SimpleSqliteDict(
     *args,
@@ -138,7 +160,14 @@ def SimpleSqliteDict(
         table=table,
     )
 
-    finalize(connection, _close, db)
+    def _close():
+        '''Optimize and close the database.
+        '''
+        with closing(db) as d, closing(d.cursor()) as cursor:
+            cursor.execute('PRAGMA analysis_limit=8192')
+            cursor.execute('PRAGMA optimize')
+
+    finalize(connection, _close)
 
     return connection
 
@@ -318,10 +347,10 @@ class Connection(MutableMapping):
         '''Delete an item from the table.
         '''
 
-        if key not in self:
-            raise KeyError(key)
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(f'DELETE FROM "{self._safe_table}" WHERE key=?', (key,))
+            if cursor.rowcount != 1:
+                raise KeyError(key)
 
     def clear(self) -> None:
         '''Delete all items from the table.

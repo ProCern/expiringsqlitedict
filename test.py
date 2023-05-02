@@ -36,6 +36,21 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(set(d.values()), {'bar', 1337})
                 self.assertEqual(len(d), 2)
 
+            with SqliteDict(str(db_path)) as d:
+                del d['foo']
+
+            with SqliteDict(str(db_path)) as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(set(d), {'baz'})
+                self.assertEqual(set(d.keys()), {'baz'})
+                self.assertEqual(set(d.items()), {('baz', 1337)})
+                self.assertEqual(set(d.values()), {1337})
+                self.assertEqual(len(d), 1)
+
+            with self.assertRaises(KeyError):
+                with SqliteDict(str(db_path)) as d:
+                    del d['foo']
+
     def test_quotes(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'

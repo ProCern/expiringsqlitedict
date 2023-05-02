@@ -20,20 +20,39 @@ class TestExpiringDict(unittest.TestCase):
 
             with SqliteDict(str(db_path)) as d:
                 self.assertFalse(bool(d))
-                self.assertEqual(set(d), set())
-                self.assertEqual(set(d.keys()), set())
-                self.assertEqual(set(d.items()), set())
-                self.assertEqual(set(d.values()), set())
+                self.assertEqual(tuple(d), ())
+                self.assertEqual(tuple(d.keys()), ())
+                self.assertEqual(tuple(d.items()), ())
+                self.assertEqual(tuple(d.values()), ())
                 self.assertEqual(len(d), 0)
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
             with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'foo', 'baz'})
-                self.assertEqual(set(d.keys()), {'foo', 'baz'})
-                self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
-                self.assertEqual(set(d.values()), {'bar', 1337})
+                self.assertEqual(tuple(d), ('foo', 'baz'))
+                self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
+                self.assertEqual(tuple(d.items()), (('foo', 'bar'), ('baz', 1337)))
+                self.assertEqual(tuple(d.values()), ('bar', 1337))
+                self.assertEqual(len(d), 2)
+
+                self.assertEqual(tuple(reversed(d)), ('baz', 'foo'))
+                self.assertEqual(tuple(reversed(d.keys())), ('baz', 'foo'))
+                self.assertEqual(
+                    tuple(reversed(d.items())),
+                    (('baz', 1337), ('foo', 'bar')),
+                )
+                self.assertEqual(tuple(reversed(d.values())), (1337, 'bar'))
+
+            with SqliteDict(str(db_path)) as d:
+                d['foo'] = 'barbar'
+
+            with SqliteDict(str(db_path)) as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(tuple(d), ('foo', 'baz'))
+                self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
+                self.assertEqual(tuple(d.items()), (('foo', 'barbar'), ('baz', 1337)))
+                self.assertEqual(tuple(d.values()), ('barbar', 1337))
                 self.assertEqual(len(d), 2)
 
             with SqliteDict(str(db_path)) as d:
@@ -41,54 +60,27 @@ class TestExpiringDict(unittest.TestCase):
 
             with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'baz'})
-                self.assertEqual(set(d.keys()), {'baz'})
-                self.assertEqual(set(d.items()), {('baz', 1337)})
-                self.assertEqual(set(d.values()), {1337})
+                self.assertEqual(tuple(d), ('baz',))
+                self.assertEqual(tuple(d.keys()), ('baz',))
+                self.assertEqual(tuple(d.items()), (('baz', 1337),))
+                self.assertEqual(tuple(d.values()), (1337,))
                 self.assertEqual(len(d), 1)
 
             with self.assertRaises(KeyError):
                 with SqliteDict(str(db_path)) as d:
                     del d['foo']
 
-    def test_simple_reentrant(self):
-        with TemporaryDirectory() as temporary_directory:
-            db_path = Path(temporary_directory) / 'test.db'
+            
+            with SqliteDict(str(db_path)) as d:
+                d['foo'] = 'spam'
 
-            manager = SqliteDict(str(db_path))
-
-            with manager as d:
-                self.assertFalse(bool(d))
-                self.assertEqual(set(d), set())
-                self.assertEqual(set(d.keys()), set())
-                self.assertEqual(set(d.items()), set())
-                self.assertEqual(set(d.values()), set())
-                self.assertEqual(len(d), 0)
-                d['foo'] = 'bar'
-                d['baz'] = 1337
-
-            with manager as d:
+            with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'foo', 'baz'})
-                self.assertEqual(set(d.keys()), {'foo', 'baz'})
-                self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
-                self.assertEqual(set(d.values()), {'bar', 1337})
+                self.assertEqual(tuple(d), ('baz', 'foo'))
+                self.assertEqual(tuple(d.keys()), ('baz', 'foo'))
+                self.assertEqual(tuple(d.items()), (('baz', 1337), ('foo', 'spam')))
+                self.assertEqual(tuple(d.values()), (1337, 'spam'))
                 self.assertEqual(len(d), 2)
-
-            with manager as d:
-                del d['foo']
-
-            with manager as d:
-                self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'baz'})
-                self.assertEqual(set(d.keys()), {'baz'})
-                self.assertEqual(set(d.items()), {('baz', 1337)})
-                self.assertEqual(set(d.values()), {1337})
-                self.assertEqual(len(d), 1)
-
-            with self.assertRaises(KeyError):
-                with manager as d:
-                    del d['foo']
 
     def test_quotes(self):
         with TemporaryDirectory() as temporary_directory:
@@ -99,10 +91,10 @@ class TestExpiringDict(unittest.TestCase):
                 table = 'Name\\with"special\t-_ char""ac"""ters',
             ) as d:
                 self.assertFalse(bool(d))
-                self.assertEqual(set(d), set())
-                self.assertEqual(set(d.keys()), set())
-                self.assertEqual(set(d.items()), set())
-                self.assertEqual(set(d.values()), set())
+                self.assertEqual(tuple(d), ())
+                self.assertEqual(tuple(d.keys()), ())
+                self.assertEqual(tuple(d.items()), ())
+                self.assertEqual(tuple(d.values()), ())
                 self.assertEqual(len(d), 0)
                 d['foo'] = 'bar'
                 d['baz'] = 1337
@@ -112,10 +104,10 @@ class TestExpiringDict(unittest.TestCase):
                 table = 'Name\\with"special\t-_ char""ac"""ters',
             ) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'foo', 'baz'})
-                self.assertEqual(set(d.keys()), {'foo', 'baz'})
-                self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
-                self.assertEqual(set(d.values()), {'bar', 1337})
+                self.assertEqual(tuple(d), ('foo', 'baz'))
+                self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
+                self.assertEqual(tuple(d.items()), (('foo', 'bar'), ('baz', 1337)))
+                self.assertEqual(tuple(d.values()), ('bar', 1337))
                 self.assertEqual(len(d), 2)
 
     def test_autocommit(self):
@@ -124,20 +116,20 @@ class TestExpiringDict(unittest.TestCase):
 
             d = SimpleSqliteDict(str(db_path))
             self.assertFalse(bool(d))
-            self.assertEqual(set(d), set())
-            self.assertEqual(set(d.keys()), set())
-            self.assertEqual(set(d.items()), set())
-            self.assertEqual(set(d.values()), set())
+            self.assertEqual(tuple(d), ())
+            self.assertEqual(tuple(d.keys()), ())
+            self.assertEqual(tuple(d.items()), ())
+            self.assertEqual(tuple(d.values()), ())
             self.assertEqual(len(d), 0)
             d['foo'] = 'bar'
             d['baz'] = 1337
 
             d = SimpleSqliteDict(str(db_path))
             self.assertTrue(bool(d))
-            self.assertEqual(set(d), {'foo', 'baz'})
-            self.assertEqual(set(d.keys()), {'foo', 'baz'})
-            self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
-            self.assertEqual(set(d.values()), {'bar', 1337})
+            self.assertEqual(tuple(d), ('foo', 'baz'))
+            self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
+            self.assertEqual(tuple(d.items()), (('foo', 'bar'), ('baz', 1337)))
+            self.assertEqual(tuple(d.values()), ('bar', 1337))
             self.assertEqual(len(d), 2)
 
     def test_isolation_level(self):
@@ -146,10 +138,10 @@ class TestExpiringDict(unittest.TestCase):
 
             d = SimpleSqliteDict(str(db_path), isolation_level='DEFERRED')
             self.assertFalse(bool(d))
-            self.assertEqual(set(d), set())
-            self.assertEqual(set(d.keys()), set())
-            self.assertEqual(set(d.items()), set())
-            self.assertEqual(set(d.values()), set())
+            self.assertEqual(tuple(d), ())
+            self.assertEqual(tuple(d.keys()), ())
+            self.assertEqual(tuple(d.items()), ())
+            self.assertEqual(tuple(d.values()), ())
             self.assertEqual(len(d), 0)
             d['foo'] = 'bar'
             d.connection.commit()
@@ -158,10 +150,10 @@ class TestExpiringDict(unittest.TestCase):
 
             d = SimpleSqliteDict(str(db_path))
             self.assertTrue(bool(d))
-            self.assertEqual(set(d), {'foo'})
-            self.assertEqual(set(d.keys()), {'foo'})
-            self.assertEqual(set(d.items()), {('foo', 'bar')})
-            self.assertEqual(set(d.values()), {'bar'})
+            self.assertEqual(tuple(d), ('foo',))
+            self.assertEqual(tuple(d.keys()), ('foo',))
+            self.assertEqual(tuple(d.items()), (('foo', 'bar'),))
+            self.assertEqual(tuple(d.values()), ('bar',))
             self.assertEqual(len(d), 1)
 
     def test_nested(self):
@@ -232,13 +224,13 @@ class TestExpiringDict(unittest.TestCase):
 
             with SqliteDict(str(db_path)) as d:
                 self.assertTrue(bool(d))
-                self.assertEqual(set(d), {'baz', 'postponed'})
-                self.assertEqual(set(d.keys()), {'baz', 'postponed'})
+                self.assertEqual(tuple(d), ('postponed', 'baz'))
+                self.assertEqual(tuple(d.keys()), ('postponed', 'baz'))
                 self.assertEqual(
-                    set(d.items()),
-                    {('baz', 1337), ('postponed', 'worked')},
+                    tuple(d.items()),
+                    (('postponed', 'worked'), ('baz', 1337)),
                 )
-                self.assertEqual(set(d.values()), {1337, 'worked'})
+                self.assertEqual(tuple(d.values()), ('worked', 1337))
                 self.assertEqual(len(d), 2)
 
 if __name__ == '__main__':

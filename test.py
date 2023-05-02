@@ -11,6 +11,7 @@ from expiringsqlitedict import SqliteDict, SimpleSqliteDict
 import json
 import marshal
 import pickle
+import orjson
 
 class TestExpiringDict(unittest.TestCase):
     def test_simple(self):
@@ -127,6 +128,16 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
             with SqliteDict(str(db_path), serializer = json) as d:
+                self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
+
+    def test_orjson(self):
+        with TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / 'test.db'
+
+            with SqliteDict(str(db_path), serializer = orjson) as d:
+                d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
+
+            with SqliteDict(str(db_path), serializer = orjson) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_pickle(self):

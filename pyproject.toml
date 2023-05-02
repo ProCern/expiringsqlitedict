@@ -27,3 +27,8 @@ documentation = 'https://expiringsqlitedict.readthedocs.io/'
 [build-system]
 build-backend = "flit_core.buildapi"
 requires = ["flit_core >=3.2,<4", 'wheel']
+
+[project.optional-dependencies]
+test = [
+    'orjson',
+]

@@ -275,6 +275,8 @@ if sqlite3.sqlite_version_info >= (3, 38):
 else:
     _unixepoch = "CAST(strftime('%s', 'now') AS INTEGER)"
 
+APPLICATION_ID = 1820903862
+
 class Connection(MutableMapping):
     '''The actual connection object, as a MutableMapping[str, Any].
 
@@ -304,40 +306,91 @@ class Connection(MutableMapping):
         self._safe_table = table.replace('"', '""')
 
         with closing(self._connection.cursor()) as cursor:
+            application_id = next(cursor.execute('PRAGMA application_id'))[0]
+            if application_id == 0:
+                cursor.execute(f'PRAGMA application_id = {APPLICATION_ID}')
+            elif application_id != APPLICATION_ID:
+                raise ValueError(f'illegal application ID {application_id}')
+
+            user_version = next(cursor.execute('PRAGMA user_version'))[0]
+
+            if user_version < 1:
+                # Attempt to migrate, because of pre-6.1 versions.  We can't
+                # otherwise tell the difference between a fresh database and a
+                # pre-set one.
+                cursor.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (self._table,),
+                )
+                migrate = bool(cursor.fetchall())
+
+                if migrate:
+                    cursor.execute(f'''
+                        DROP INDEX IF EXISTS "{self._safe_table}_expire_index"
+                    ''')
+                    cursor.execute(f'''
+                        DROP TRIGGER IF EXISTS "{self._safe_table}_insert_trigger"
+                    ''')
+                    cursor.execute(f'''
+                        DROP TRIGGER IF EXISTS "{self._safe_table}_update_trigger"
+                    ''')
+                    cursor.execute(f'''
+                        ALTER TABLE "{self._safe_table}"
+                        RENAME TO "{self._safe_table}_v0"
+                    ''')
 
 
-            cursor.execute(f'''
-                CREATE TABLE IF NOT EXISTS "{self._safe_table}" (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                    key TEXT UNIQUE NOT NULL,
-                    expire INTEGER NOT NULL,
-                    value {_valuetype} NOT NULL){_trailer}
-            ''')
+                cursor.execute(f'''
+                    CREATE TABLE "{self._safe_table}" (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        key TEXT UNIQUE NOT NULL,
+                        expire INTEGER NOT NULL,
+                        value {_valuetype} NOT NULL){_trailer}
+                ''')
 
-            cursor.execute(f'''
-                CREATE INDEX IF NOT EXISTS "{self._safe_table}_expire_index"
-                 ON "{self._safe_table}" (expire)
-            ''')
+                cursor.execute(f'''
+                    CREATE INDEX "{self._safe_table}_expire_index"
+                     ON "{self._safe_table}" (expire)
+                ''')
 
-            cursor.execute(
-                f'''
-                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_insert_trigger"
-                    AFTER INSERT ON "{self._safe_table}"
-                BEGIN
-                    DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
-                END
-                '''
-            )
+                cursor.execute(
+                    f'''
+                    CREATE TRIGGER "{self._safe_table}_insert_trigger"
+                        AFTER INSERT ON "{self._safe_table}"
+                    BEGIN
+                        DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
+                    END
+                    '''
+                )
 
-            cursor.execute(
-                f'''
-                CREATE TRIGGER IF NOT EXISTS "{self._safe_table}_update_trigger"
-                    AFTER UPDATE OF value ON "{self._safe_table}"
-                BEGIN
-                    DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
-                END
-                '''
-            )
+                cursor.execute(
+                    f'''
+                    CREATE TRIGGER "{self._safe_table}_update_trigger"
+                        AFTER UPDATE OF value ON "{self._safe_table}"
+                    BEGIN
+                        DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
+                    END
+                    '''
+                )
+
+                if migrate:
+                    cursor.execute(f'''
+                        INSERT INTO "{self._safe_table}"
+                            (key, expire, value)
+                        SELECT key, expire, value
+                            FROM "{self._safe_table}_v0"
+                    ''')
+                    cursor.execute(f'DROP TABLE "{self._safe_table}_v0"')
+
+                cursor.execute('PRAGMA user_version = 1')
+
+                user_version = 1
+
+            if user_version > 1:
+                raise ValueError(
+                    'this version of expiringsqlitedict is not'
+                    ' compatible with this schema version'
+                )
     @property
     def connection(self) -> sqlite3.Connection:
         return self._connection

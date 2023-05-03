@@ -3,6 +3,8 @@
 # Copyright © 2021 Taylor C. Richberger
 # This code is released under the license described in the LICENSE file
 
+from contextlib import closing
+import sqlite3
 import unittest
 from datetime import timedelta
 from tempfile import TemporaryDirectory
@@ -43,6 +45,97 @@ class TestExpiringDict(unittest.TestCase):
                     (('baz', 1337), ('foo', 'bar')),
                 )
                 self.assertEqual(tuple(reversed(d.values())), (1337, 'bar'))
+
+            with SqliteDict(str(db_path)) as d:
+                d['foo'] = 'barbar'
+
+            with SqliteDict(str(db_path)) as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(tuple(d), ('foo', 'baz'))
+                self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
+                self.assertEqual(tuple(d.items()), (('foo', 'barbar'), ('baz', 1337)))
+                self.assertEqual(tuple(d.values()), ('barbar', 1337))
+                self.assertEqual(len(d), 2)
+
+            with SqliteDict(str(db_path)) as d:
+                del d['foo']
+
+            with SqliteDict(str(db_path)) as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(tuple(d), ('baz',))
+                self.assertEqual(tuple(d.keys()), ('baz',))
+                self.assertEqual(tuple(d.items()), (('baz', 1337),))
+                self.assertEqual(tuple(d.values()), (1337,))
+                self.assertEqual(len(d), 1)
+
+            with self.assertRaises(KeyError):
+                with SqliteDict(str(db_path)) as d:
+                    del d['foo']
+
+            
+            with SqliteDict(str(db_path)) as d:
+                d['foo'] = 'spam'
+
+            with SqliteDict(str(db_path)) as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(tuple(d), ('baz', 'foo'))
+                self.assertEqual(tuple(d.keys()), ('baz', 'foo'))
+                self.assertEqual(tuple(d.items()), (('baz', 1337), ('foo', 'spam')))
+                self.assertEqual(tuple(d.values()), (1337, 'spam'))
+                self.assertEqual(len(d), 2)
+
+    def test_migration(self):
+        with TemporaryDirectory() as temporary_directory:
+            db_path = Path(temporary_directory) / 'test.db'
+
+            with closing(sqlite3.connect(str(db_path))) as connection:
+                with closing(connection.cursor()) as cursor:
+                    cursor.execute('''
+                        CREATE TABLE expiringsqlitedict (
+                            key TEXT UNIQUE PRIMARY KEY NOT NULL,
+                            expire INTEGER NOT NULL,
+                            value BLOB NOT NULL
+                        )
+                    ''')
+                    cursor.execute('''
+                        CREATE INDEX expiringsqlitedict_expire_index
+                            ON expiringsqlitedict (expire)
+                    ''')
+                    cursor.execute('''
+                        CREATE TRIGGER expiringsqlitedict_insert_trigger
+                            AFTER INSERT ON expiringsqlitedict
+                        BEGIN
+                            DELETE FROM expiringsqlitedict
+                                WHERE expire <= strftime('%s', 'now');
+                        END
+                    ''')
+                    cursor.execute('''
+                        CREATE TRIGGER expiringsqlitedict_update_trigger
+                            AFTER UPDATE ON expiringsqlitedict
+                        BEGIN
+                            DELETE FROM expiringsqlitedict
+                                WHERE expire <= strftime('%s', 'now');
+                        END
+                    ''')
+                    cursor.executemany(
+                        '''
+                            INSERT INTO expiringsqlitedict (key, expire, value)
+                            VALUES (?, strftime('%s', 'now', '+7 days'), ?)
+                        ''',
+                        (
+                            ('foo', '"bar"'),
+                            ('baz', '1337'),
+                        ),
+                    )
+                connection.commit()
+
+            with SqliteDict(str(db_path)) as d:
+                self.assertTrue(bool(d))
+                self.assertEqual(set(d), {'foo', 'baz'})
+                self.assertEqual(set(d.keys()), {'foo', 'baz'})
+                self.assertEqual(set(d.items()), {('foo', 'bar'), ('baz', 1337)})
+                self.assertEqual(set(d.values()), {'bar', 1337})
+                self.assertEqual(len(d), 2)
 
             with SqliteDict(str(db_path)) as d:
                 d['foo'] = 'barbar'

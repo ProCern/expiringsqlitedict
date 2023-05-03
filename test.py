@@ -9,7 +9,7 @@ import unittest
 from datetime import timedelta
 from tempfile import TemporaryDirectory
 from pathlib import Path
-from expiringsqlitedict import SqliteDict, SimpleSqliteDict
+from expiringsqlitedict import SqliteDict, SimpleSqliteDict, Order
 import json
 import marshal
 import pickle
@@ -45,6 +45,20 @@ class TestExpiringDict(unittest.TestCase):
                     (('baz', 1337), ('foo', 'bar')),
                 )
                 self.assertEqual(tuple(reversed(d.values())), (1337, 'bar'))
+
+                self.assertEqual(tuple(d.keys(Order.KEY)), ('baz', 'foo'))
+                self.assertEqual(
+                    tuple(d.items(Order.KEY)),
+                    (('baz', 1337), ('foo', 'bar')),
+                )
+                self.assertEqual(tuple(d.values(Order.KEY)), (1337, 'bar'))
+
+                self.assertEqual(tuple(reversed(d.keys(Order.KEY))), ('foo', 'baz'))
+                self.assertEqual(
+                    tuple(reversed(d.items(Order.KEY))),
+                    (('foo', 'bar'), ('baz', 1337)),
+                )
+                self.assertEqual(tuple(reversed(d.values(Order.KEY))), ('bar', 1337))
 
             with SqliteDict(str(db_path)) as d:
                 d['foo'] = 'barbar'

@@ -19,6 +19,22 @@ from datetime import timedelta
 from types import TracebackType
 from typing import Any, Generator, Iterable, Iterator, Optional, Reversible, Tuple, Type
 from weakref import finalize
+from enum import unique, Enum
+
+@unique
+class Order(str, Enum):
+    '''An ordering enum for iteration methods.
+    '''
+
+    ID = 'id'
+    KEY = 'key'
+    EXPIRE = 'expire'
+
+    def __str__(self) -> str:
+        return self.value
+
+    def __format__(self, format_spec: str) -> str:
+        return self.value.__format__(format_spec)
 
 @contextmanager
 def _transaction(
@@ -41,21 +57,24 @@ class _Keys(Reversible, Iterable[str]):
     __slots__ = (
         '_connection',
         '_table',
+        '_order',
     )
 
     def __init__(
         self,
         connection: sqlite3.Connection,
         table: str,
+        order: Order,
     ) -> None:
 
         self._connection = connection
         self._table = table
-
+        self._order = order
+    
     def _iterator(self, order: str) -> Iterator[str]:
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(
-                f'SELECT key FROM "{self._table}" ORDER BY id {order}',
+                f'SELECT key FROM "{self._table}" ORDER BY {self._order} {order}',
             ):
                 yield row[0]
 
@@ -70,6 +89,7 @@ class _Values(Reversible, Iterable[Any]):
         '_connection',
         '_table',
         '_serializer',
+        '_order',
     )
 
     def __init__(
@@ -77,16 +97,18 @@ class _Values(Reversible, Iterable[Any]):
         connection: sqlite3.Connection,
         table: str,
         serializer: Any,
+        order: Order,
     ) -> None:
 
         self._connection = connection
         self._table = table
         self._serializer = serializer
+        self._order = order
 
     def _iterator(self, order: str) -> Iterator[Any]:
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(
-                f'SELECT value FROM "{self._table}" ORDER BY id {order}',
+                f'SELECT value FROM "{self._table}" ORDER BY {self._order} {order}',
             ):
                 yield self._serializer.loads(row[0])
 
@@ -101,6 +123,7 @@ class _Items(Reversible, Iterable[Tuple[str, Any]]):
         '_connection',
         '_table',
         '_serializer',
+        '_order',
     )
 
     def __init__(
@@ -108,16 +131,19 @@ class _Items(Reversible, Iterable[Tuple[str, Any]]):
         connection: sqlite3.Connection,
         table: str,
         serializer: Any,
+        order: Order,
     ) -> None:
         self._connection = connection
         self._table = table
         self._serializer = serializer
-
+        self._order = order
+    
     def _iterator(self, order: str) -> Iterator[Tuple[str, Any]]:
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(
-                f'SELECT key, value FROM "{self._table}" ORDER BY id {order}',
-            ):
+            for row in cursor.execute(f'''
+                SELECT key, value FROM "{self._table}"
+                    ORDER BY {self._order} {order}
+            '''):
                 yield row[0], self._serializer.loads(row[1])
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
@@ -423,13 +449,14 @@ class Connection(MutableMapping):
 
         return len(self) > 0
 
-    def keys(self) -> _Keys:
+    def keys(self, order: Order = Order.ID) -> _Keys:
         '''Iterate over keys in the table.
         '''
 
         return _Keys(
             connection=self._connection,
             table=self._safe_table,
+            order=order,
         )
 
     def __iter__(self) -> Iterator[str]:
@@ -438,7 +465,7 @@ class Connection(MutableMapping):
     def __reversed__(self) -> Iterator[str]:
         return reversed(self.keys())
 
-    def values(self) -> _Values:
+    def values(self, order: Order = Order.ID) -> _Values:
         '''Iterate over values in the table.
         '''
 
@@ -446,9 +473,10 @@ class Connection(MutableMapping):
             connection=self._connection,
             table=self._safe_table,
             serializer=self._serializer,
+            order=order,
         )
 
-    def items(self) -> _Items:
+    def items(self, order: Order = Order.ID) -> _Items:
         '''Iterate over keys and values in the table.
         '''
 
@@ -456,6 +484,7 @@ class Connection(MutableMapping):
             connection=self._connection,
             table=self._safe_table,
             serializer=self._serializer,
+            order=order,
         )
 
     def __contains__(self, key: str) -> bool:

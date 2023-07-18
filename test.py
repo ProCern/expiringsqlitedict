@@ -9,7 +9,7 @@ import unittest
 from datetime import timedelta
 from tempfile import TemporaryDirectory
 from pathlib import Path
-from expiringsqlitedict import SqliteDict, SimpleSqliteDict, Order
+from expiringsqlitedict import Manager, Simple, Order
 import json
 import marshal
 import pickle
@@ -20,7 +20,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertFalse(bool(d))
                 self.assertEqual(tuple(d), ())
                 self.assertEqual(tuple(d.keys()), ())
@@ -30,7 +30,7 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('foo', 'baz'))
                 self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
@@ -60,10 +60,10 @@ class TestExpiringDict(unittest.TestCase):
                 )
                 self.assertEqual(tuple(reversed(d.values(Order.KEY))), ('bar', 1337))
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d['foo'] = 'barbar'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('foo', 'baz'))
                 self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
@@ -71,10 +71,10 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(tuple(d.values()), ('barbar', 1337))
                 self.assertEqual(len(d), 2)
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 del d['foo']
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('baz',))
                 self.assertEqual(tuple(d.keys()), ('baz',))
@@ -83,14 +83,14 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(len(d), 1)
 
             with self.assertRaises(KeyError):
-                with SqliteDict(str(db_path)) as d:
+                with Manager(str(db_path)) as d:
                     del d['foo']
 
             
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d['foo'] = 'spam'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('baz', 'foo'))
                 self.assertEqual(tuple(d.keys()), ('baz', 'foo'))
@@ -143,7 +143,7 @@ class TestExpiringDict(unittest.TestCase):
                     )
                 connection.commit()
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(set(d), {'foo', 'baz'})
                 self.assertEqual(set(d.keys()), {'foo', 'baz'})
@@ -151,10 +151,10 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(set(d.values()), {'bar', 1337})
                 self.assertEqual(len(d), 2)
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d['foo'] = 'barbar'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('foo', 'baz'))
                 self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
@@ -162,10 +162,10 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(tuple(d.values()), ('barbar', 1337))
                 self.assertEqual(len(d), 2)
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 del d['foo']
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('baz',))
                 self.assertEqual(tuple(d.keys()), ('baz',))
@@ -174,14 +174,14 @@ class TestExpiringDict(unittest.TestCase):
                 self.assertEqual(len(d), 1)
 
             with self.assertRaises(KeyError):
-                with SqliteDict(str(db_path)) as d:
+                with Manager(str(db_path)) as d:
                     del d['foo']
 
             
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d['foo'] = 'spam'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('baz', 'foo'))
                 self.assertEqual(tuple(d.keys()), ('baz', 'foo'))
@@ -193,7 +193,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(
+            with Manager(
                 str(db_path),
                 table = 'Name\\with"special\t-_ char""ac"""ters',
             ) as d:
@@ -206,7 +206,7 @@ class TestExpiringDict(unittest.TestCase):
                 d['foo'] = 'bar'
                 d['baz'] = 1337
 
-            with SqliteDict(
+            with Manager(
                 str(db_path),
                 table = 'Name\\with"special\t-_ char""ac"""ters',
             ) as d:
@@ -221,7 +221,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            d = SimpleSqliteDict(str(db_path))
+            d = Simple(str(db_path))
             self.assertFalse(bool(d))
             self.assertEqual(tuple(d), ())
             self.assertEqual(tuple(d.keys()), ())
@@ -231,7 +231,7 @@ class TestExpiringDict(unittest.TestCase):
             d['foo'] = 'bar'
             d['baz'] = 1337
 
-            d = SimpleSqliteDict(str(db_path))
+            d = Simple(str(db_path))
             self.assertTrue(bool(d))
             self.assertEqual(tuple(d), ('foo', 'baz'))
             self.assertEqual(tuple(d.keys()), ('foo', 'baz'))
@@ -243,7 +243,7 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            d = SimpleSqliteDict(str(db_path), isolation_level='DEFERRED')
+            d = Simple(str(db_path), isolation_level='DEFERRED')
             self.assertFalse(bool(d))
             self.assertEqual(tuple(d), ())
             self.assertEqual(tuple(d.keys()), ())
@@ -255,7 +255,7 @@ class TestExpiringDict(unittest.TestCase):
             d['baz'] = 1337
             d.connection.rollback()
 
-            d = SimpleSqliteDict(str(db_path))
+            d = Simple(str(db_path))
             self.assertTrue(bool(d))
             self.assertEqual(tuple(d), ('foo',))
             self.assertEqual(tuple(d.keys()), ('foo',))
@@ -267,61 +267,61 @@ class TestExpiringDict(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_json(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path), serializer = json) as d:
+            with Manager(str(db_path), serializer = json) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(str(db_path), serializer = json) as d:
+            with Manager(str(db_path), serializer = json) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_orjson(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path), serializer = orjson) as d:
+            with Manager(str(db_path), serializer = orjson) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(str(db_path), serializer = orjson) as d:
+            with Manager(str(db_path), serializer = orjson) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_pickle(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path), serializer = pickle) as d:
+            with Manager(str(db_path), serializer = pickle) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(str(db_path), serializer = pickle) as d:
+            with Manager(str(db_path), serializer = pickle) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_marshal(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path), serializer = marshal) as d:
+            with Manager(str(db_path), serializer = marshal) as d:
                 d['foo'] = {'foo': 'bar', 'baz': [2, 'two']}
 
-            with SqliteDict(str(db_path), serializer = marshal) as d:
+            with Manager(str(db_path), serializer = marshal) as d:
                 self.assertEqual(d['foo'], {'foo': 'bar', 'baz': [2, 'two']})
 
     def test_expire(self):
         with TemporaryDirectory() as temporary_directory:
             db_path = Path(temporary_directory) / 'test.db'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d['foo'] = 'bar'
                 d['postponed'] = 'worked'
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 d.lifespan = timedelta(weeks=-1)
                 d.postpone_all()
                 d.lifespan = timedelta(weeks=1)
@@ -329,7 +329,7 @@ class TestExpiringDict(unittest.TestCase):
                 # This triggers the actual expiry
                 d['baz'] = 1337
 
-            with SqliteDict(str(db_path)) as d:
+            with Manager(str(db_path)) as d:
                 self.assertTrue(bool(d))
                 self.assertEqual(tuple(d), ('postponed', 'baz'))
                 self.assertEqual(tuple(d.keys()), ('postponed', 'baz'))

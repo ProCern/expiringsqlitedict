@@ -1,25 +1,62 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-#
-# This code is distributed under the terms and conditions
-# from the Apache License, Version 2.0
-#
-# http://opensource.org/licenses/apache2.0.php
-#
-# This code was inspired by:
-#  * http://code.activestate.com/recipes/576638-draft-for-an-sqlite3-based-dbm/
-#  * http://code.activestate.com/recipes/526618/
-
 
 import json
+from re import DEBUG
 import sqlite3
-from collections.abc import MutableMapping
+from sqlite3 import sqlite_version_info
 from contextlib import ExitStack, closing, contextmanager
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Generator, Iterable, Iterator, Optional, Reversible, Tuple, Type
+from typing import Any, Generator, Iterable, Iterator, Optional, Reversible, Tuple, Type, Union, MutableMapping
 from weakref import finalize
 from enum import unique, Enum
+
+class Identifier:
+    '''An auto-escaping identifier similar to a string.
+    '''
+    __slots__ = (
+        '__value',
+    )
+
+    def __init__(self, value: str) -> None:
+        self.__value = value
+
+    @property
+    def value(self) -> str:
+        return self.__value
+
+    def __add__(self, other: Union['Identifier', str]) -> 'Identifier':
+        if isinstance(other, Identifier):
+            other = other.__value
+        return Identifier(self.__value + other)
+
+    def __radd__(self, other: Union['Identifier', str]) -> 'Identifier':
+        if isinstance(other, Identifier):
+            other = other.__value
+        return Identifier(other + self.__value)
+
+    def __iadd__(self, other: Union['Identifier', str]) -> 'Identifier':
+        if isinstance(other, Identifier):
+            other = other.__value
+        self.__value += other
+        return self
+
+    def __contains__(self, other: Union['Identifier', str]) -> bool:
+        if isinstance(other, Identifier):
+            other = other.__value
+        return self.__value.__contains__(other)
+
+    def __hash__(self) -> int:
+        return hash(self.__value)
+
+    def __repr__(self) -> str:
+        return f'<Identifier {self}>'
+
+    def __str__(self) -> str:
+        if b'\x00' in self.__value.encode('utf-8'):
+            raise ValueError("sqlite Identifer must not contain any null bytes")
+
+        return '"' + self.__value.replace('"', '""') + '"'
 
 @unique
 class Order(str, Enum):
@@ -74,7 +111,7 @@ class _Keys(Reversible, Iterable[str]):
     def _iterator(self, order: str) -> Iterator[str]:
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(
-                f'SELECT key FROM "{self._table}" ORDER BY {self._order} {order}',
+                f'SELECT key FROM {self._table} ORDER BY {self._order} {order}',
             ):
                 yield row[0]
 
@@ -108,7 +145,7 @@ class _Values(Reversible, Iterable[Any]):
     def _iterator(self, order: str) -> Iterator[Any]:
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(
-                f'SELECT value FROM "{self._table}" ORDER BY {self._order} {order}',
+                f'SELECT value FROM {self._table} ORDER BY {self._order} {order}',
             ):
                 yield self._serializer.loads(row[0])
 
@@ -141,7 +178,7 @@ class _Items(Reversible, Iterable[Tuple[str, Any]]):
     def _iterator(self, order: str) -> Iterator[Tuple[str, Any]]:
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(f'''
-                SELECT key, value FROM "{self._table}"
+                SELECT key, value FROM {self._table}
                     ORDER BY {self._order} {order}
             '''):
                 yield row[0], self._serializer.loads(row[1])
@@ -152,16 +189,12 @@ class _Items(Reversible, Iterable[Tuple[str, Any]]):
     def __reversed__(self) -> Iterator[Tuple[str, Any]]:
         return self._iterator('DESC')
 
-class SqliteDict:
+
+class ConnectionManager:
     """
-    Set up the sqlite dictionary manager.
+    Opens a SQLite connection and yields a TransactionManager.
 
-    This needs to be used as a context manager.  It will not operate at all
-    otherwise. args and kwargs are directly passed to sqlite3.connect.  Use
-    these to customize your connection, such as making it read-only.
-
-    This is lazy, and won't even open the database until it is entered.  It may
-    be re-opened after it has closed.
+    On close, this closes the SQLite connection.  This may be entered more than once.
     """
 
     __slots__ = (
@@ -171,9 +204,8 @@ class SqliteDict:
         '_exit_stack',
         '_serializer',
         '_lifespan',
-        '_begin',
+        '_transaction',
         '_table',
-        '__weakref__'
     )
 
     def __init__(self,
@@ -181,14 +213,17 @@ class SqliteDict:
         serializer: Any = json,
         lifespan: timedelta = timedelta(weeks=1),
         transaction: str = 'IMMEDIATE',
-        table: str = 'expiringsqlitedict',
+        table: Union[str, Identifier] = Identifier('expiringsqlitedict'),
         **kwargs,
     ) -> None:
+        if isinstance(table, str):
+            table = Identifier(table)
+
         self._args = args
         self._kwargs = kwargs
         self._serializer = serializer
         self._lifespan = lifespan
-        self._begin = f'BEGIN {transaction} TRANSACTION'
+        self._transaction = transaction
         self._table = table
 
     @property
@@ -196,8 +231,8 @@ class SqliteDict:
         '''The current lifespan.
 
         Changing this will change the calculated expiration time of future set
-        items.  It will not retroactively apply to existing items unless you explicitly
-        postpone them.
+        items.  It will not retroactively apply to existing items unless you
+        explicitly postpone them.
         '''
         return self._lifespan
 
@@ -205,7 +240,9 @@ class SqliteDict:
     def lifespan(self, value: timedelta) -> None:
         self._lifespan = value
 
-    def __enter__(self) -> 'Connection':
+    def __enter__(self) -> 'TransactionManager':
+        assert not hasattr(self, '_exit_stack'), 'Can not be entered more than once at a time'
+
         with ExitStack() as exit_stack:
             self._connection = exit_stack.enter_context(closing(sqlite3.connect(
                 *self._args,
@@ -224,6 +261,81 @@ class SqliteDict:
 
             exit_stack.callback(optimize)
 
+            transaction_manager = TransactionManager(
+                connection=self._connection,
+                serializer=self._serializer,
+                lifespan=self._lifespan,
+                transaction=self._transaction,
+                table=self._table,
+            )
+                
+            self._exit_stack = exit_stack.pop_all()
+
+            return transaction_manager
+
+        assert False, 'UNREACHABLE'
+
+    def __exit__(
+        self,
+        type: Optional[Type[BaseException]],
+        value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> bool:
+        try:
+            return self._exit_stack.__exit__(type, value, traceback)
+        finally:
+            del self._connection, self._exit_stack
+
+class TransactionManager:
+    """
+    Enters and leaves a transaction for a SQLite dict.
+
+    On close, commits or abandons the transaction.
+    """
+
+    __slots__ = (
+        '_connection',
+        '_exit_stack',
+        '_serializer',
+        '_lifespan',
+        '_begin',
+        '_table',
+    )
+
+    def __init__(self,
+        connection: sqlite3.Connection,
+        serializer: Any = json,
+        lifespan: timedelta = timedelta(weeks=1),
+        transaction: str = 'IMMEDIATE',
+        table: Union[str, Identifier] = Identifier('expiringsqlitedict'),
+    ) -> None:
+        if isinstance(table, str):
+            table = Identifier(table)
+
+        self._connection = connection
+        self._serializer = serializer
+        self._lifespan = lifespan
+        self._begin = f'BEGIN {transaction} TRANSACTION'
+        self._table = table
+
+    @property
+    def lifespan(self) -> timedelta:
+        '''The current lifespan.
+
+        Changing this will change the calculated expiration time of future set
+        items.  It will not retroactively apply to existing items unless you
+        explicitly postpone them.
+        '''
+        return self._lifespan
+
+    @lifespan.setter
+    def lifespan(self, value: timedelta) -> None:
+        self._lifespan = value
+
+    def __enter__(self) -> 'Connection':
+        assert not hasattr(self, '_exit_stack'), 'Can not be entered more than once at a time'
+
+        with ExitStack() as exit_stack:
             exit_stack.enter_context(_transaction(self._connection, self._begin))
 
             connection = Connection(
@@ -248,12 +360,78 @@ class SqliteDict:
         finally:
             del self._connection, self._exit_stack
 
-def SimpleSqliteDict(
+class Manager:
+    """
+    Combines ConnectionManager and TransactionManager.
+
+    When entered, this opens the database and starts a transaction, and on exit,
+    it will commit or roll back the transaction and close the database.
+    """
+
+    __slots__ = (
+        '_connection_manager',
+        '_exit_stack',
+    )
+
+    def __init__(self,
+        *args,
+        serializer: Any = json,
+        lifespan: timedelta = timedelta(weeks=1),
+        transaction: str = 'IMMEDIATE',
+        table: Union[str, Identifier] = Identifier('expiringsqlitedict'),
+        **kwargs,
+    ) -> None:
+        self._connection_manager = ConnectionManager(
+            *args,
+            serializer=serializer,
+            lifespan=lifespan,
+            transaction=transaction,
+            table=table,
+            **kwargs
+        )
+
+    @property
+    def lifespan(self) -> timedelta:
+        '''The current lifespan.
+
+        Changing this will change the calculated expiration time of future set
+        items.  It will not retroactively apply to existing items unless you
+        explicitly postpone them.
+        '''
+        return self._connection_manager.lifespan
+
+    @lifespan.setter
+    def lifespan(self, value: timedelta) -> None:
+        self._connection_manager.lifespan = value
+
+    def __enter__(self) -> 'Connection':
+        assert not hasattr(self, '_exit_stack'), 'Can not be entered more than once at a time'
+
+        with ExitStack() as exit_stack:
+            transaction_manager = exit_stack.enter_context(self._connection_manager)
+            connection = exit_stack.enter_context(transaction_manager)
+            self._exit_stack = exit_stack.pop_all()
+            return connection
+
+        assert False, 'UNREACHABLE'
+
+    def __exit__(
+        self,
+        type: Optional[Type[BaseException]],
+        value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> bool:
+        try:
+            return self._exit_stack.__exit__(type, value, traceback)
+        finally:
+            del self._connection_manager, self._exit_stack
+
+def Simple(
     *args,
     serializer: Any = json,
     lifespan: timedelta = timedelta(weeks=1),
     isolation_level: Optional[str] = None,
-    table: str = 'expiringsqlitedict',
+    table: Union[str, Identifier] = Identifier('expiringsqlitedict'),
     **kwargs,
 ) -> 'Connection':
     """
@@ -267,6 +445,9 @@ def SimpleSqliteDict(
     with closing(db.cursor()) as cursor:
         cursor.execute('PRAGMA journal_mode=WAL')
         cursor.execute('PRAGMA synchronous=NORMAL')
+
+    if isinstance(table, str):
+        table = Identifier(table)
 
     connection = Connection(
         db,
@@ -288,7 +469,7 @@ def SimpleSqliteDict(
 
 _trailers = []
 
-if sqlite3.sqlite_version_info >= (3, 37):
+if sqlite_version_info >= (3, 37):
     _trailers.append('STRICT')
     _valuetype = 'ANY'
 else:
@@ -296,15 +477,15 @@ else:
 
 _trailer = ', '.join(_trailers)
 
-if sqlite3.sqlite_version_info >= (3, 38):
+if sqlite_version_info >= (3, 38):
     _unixepoch = 'UNIXEPOCH()'
 else:
     _unixepoch = "CAST(strftime('%s', 'now') AS INTEGER)"
 
 APPLICATION_ID = 1820903862
 
-class Connection(MutableMapping):
-    '''The actual connection object, as a MutableMapping[str, Any].
+class Connection(MutableMapping[str, Any]):
+    '''The actual connection object.
 
     Items are expired when a value is inserted or updated.  Deletion or
     postponement does not expire items.
@@ -315,7 +496,6 @@ class Connection(MutableMapping):
         '_serializer',
         '_connection',
         '_table',
-        '_safe_table',
         '__weakref__',
     )
 
@@ -323,13 +503,15 @@ class Connection(MutableMapping):
         connection: sqlite3.Connection,
         serializer: Any = json,
         lifespan: timedelta = timedelta(weeks=1),
-        table: str = 'expiringsqlitedict',
+        table: Union[str, Identifier] = Identifier('expiringsqlitedict'),
     ) -> None:
+        if isinstance(table, str):
+            table = Identifier(table)
+
         self._lifespan = lifespan.total_seconds()
         self._serializer = serializer
         self._connection = connection
         self._table = table
-        self._safe_table = table.replace('"', '""')
 
         with closing(self._connection.cursor()) as cursor:
             application_id = next(cursor.execute('PRAGMA application_id'))[0]
@@ -346,28 +528,29 @@ class Connection(MutableMapping):
                 # pre-set one.
                 cursor.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                    (self._table,),
+                    (self._table.value,),
                 )
                 migrate = bool(cursor.fetchall())
 
                 if migrate:
                     cursor.execute(f'''
-                        DROP INDEX IF EXISTS "{self._safe_table}_expire_index"
+                        DROP INDEX IF EXISTS {self._table + "_expire_index"}
                     ''')
                     cursor.execute(f'''
-                        DROP TRIGGER IF EXISTS "{self._safe_table}_insert_trigger"
+                        DROP TRIGGER IF EXISTS {self._table + "_insert_trigger"}
                     ''')
                     cursor.execute(f'''
-                        DROP TRIGGER IF EXISTS "{self._safe_table}_update_trigger"
+                        DROP TRIGGER IF EXISTS {self._table + "_update_trigger"}
                     ''')
                     cursor.execute(f'''
-                        ALTER TABLE "{self._safe_table}"
-                        RENAME TO "{self._safe_table}_v0"
+                        ALTER TABLE {self._table}
+                        RENAME TO {self._table + "_v0"}
                     ''')
 
-
+                # Use autoincrement to make this sort like a standard python
+                # dictionary, with new keys always coming last.
                 cursor.execute(f'''
-                    CREATE TABLE "{self._safe_table}" (
+                    CREATE TABLE {self._table} (
                         id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         key TEXT UNIQUE NOT NULL,
                         expire INTEGER NOT NULL,
@@ -375,38 +558,38 @@ class Connection(MutableMapping):
                 ''')
 
                 cursor.execute(f'''
-                    CREATE INDEX "{self._safe_table}_expire_index"
-                     ON "{self._safe_table}" (expire)
+                    CREATE INDEX {self._table + "_expire_index"}
+                     ON {self._table} (expire)
                 ''')
 
                 cursor.execute(
                     f'''
-                    CREATE TRIGGER "{self._safe_table}_insert_trigger"
-                        AFTER INSERT ON "{self._safe_table}"
+                    CREATE TRIGGER {self._table + "_insert_trigger"}
+                        AFTER INSERT ON {self._table}
                     BEGIN
-                        DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
+                        DELETE FROM {self._table} WHERE expire <= {_unixepoch};
                     END
                     '''
                 )
 
                 cursor.execute(
                     f'''
-                    CREATE TRIGGER "{self._safe_table}_update_trigger"
-                        AFTER UPDATE OF value ON "{self._safe_table}"
+                    CREATE TRIGGER {self._table + "_update_trigger"}
+                        AFTER UPDATE OF value ON {self._table}
                     BEGIN
-                        DELETE FROM "{self._safe_table}" WHERE expire <= {_unixepoch};
+                        DELETE FROM {self._table} WHERE expire <= {_unixepoch};
                     END
                     '''
                 )
 
                 if migrate:
                     cursor.execute(f'''
-                        INSERT INTO "{self._safe_table}"
+                        INSERT INTO {self._table}
                             (key, expire, value)
                         SELECT key, expire, value
-                            FROM "{self._safe_table}_v0"
+                            FROM {self._table + "_v0"}
                     ''')
-                    cursor.execute(f'DROP TABLE "{self._safe_table}_v0"')
+                    cursor.execute(f'DROP TABLE {self._table + "_v0"}')
 
                 cursor.execute('PRAGMA user_version = 1')
 
@@ -440,7 +623,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            for row in cursor.execute(f'SELECT COUNT(*) FROM "{self._safe_table}"'):
+            for row in cursor.execute(f'SELECT COUNT(*) FROM {self._table}'):
                 return row[0]
         return 0
 
@@ -455,7 +638,7 @@ class Connection(MutableMapping):
 
         return _Keys(
             connection=self._connection,
-            table=self._safe_table,
+            table=self._table,
             order=order,
         )
 
@@ -471,7 +654,7 @@ class Connection(MutableMapping):
 
         return _Values(
             connection=self._connection,
-            table=self._safe_table,
+            table=self._table,
             serializer=self._serializer,
             order=order,
         )
@@ -482,7 +665,7 @@ class Connection(MutableMapping):
 
         return _Items(
             connection=self._connection,
-            table=self._safe_table,
+            table=self._table,
             serializer=self._serializer,
             order=order,
         )
@@ -493,7 +676,7 @@ class Connection(MutableMapping):
 
         with closing(self._connection.cursor()) as cursor:
             for _ in cursor.execute(
-                f'SELECT 1 FROM "{self._safe_table}" WHERE key = ?',
+                f'SELECT 1 FROM {self._table} WHERE key = ?',
                 (key,),
             ):
                 return True
@@ -505,7 +688,7 @@ class Connection(MutableMapping):
 
         with closing(self._connection.cursor()) as cursor:
             for row in cursor.execute(
-                f'SELECT value FROM "{self._safe_table}" WHERE key = ?', (key,)
+                f'SELECT value FROM {self._table} WHERE key = ?', (key,)
             ):
                 return self._serializer.loads(row[0])
         raise KeyError(key)
@@ -517,9 +700,9 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            if sqlite3.sqlite_version_info >= (3, 24):
+            if sqlite_version_info >= (3, 24):
                 cursor.execute(f'''
-                        INSERT INTO "{self._safe_table}" (key, expire, value)
+                        INSERT INTO {self._table} (key, expire, value)
                             VALUES (?, {_unixepoch} + ?, ?)
                             ON CONFLICT (key) DO UPDATE
                             SET value=excluded.value, expire=excluded.expire
@@ -528,7 +711,7 @@ class Connection(MutableMapping):
                 )
             elif key in self:
                 cursor.execute(f'''
-                        UPDATE "{self._safe_table}"
+                        UPDATE {self._table}
                             SET expire={_unixepoch} + ?,
                                 value=?
                             WHERE key=?
@@ -537,7 +720,7 @@ class Connection(MutableMapping):
                 )
             else:
                 cursor.execute(f'''
-                        INSERT INTO "{self._safe_table}" (key, expire, value)
+                        INSERT INTO {self._table} (key, expire, value)
                             VALUES (?, {_unixepoch} + ?, ?)
                     ''',
                     (key, self._lifespan, self._serializer.dumps(value)),
@@ -548,7 +731,7 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            cursor.execute(f'DELETE FROM "{self._safe_table}" WHERE key=?', (key,))
+            cursor.execute(f'DELETE FROM {self._table} WHERE key=?', (key,))
             if cursor.rowcount != 1:
                 raise KeyError(key)
 
@@ -557,14 +740,14 @@ class Connection(MutableMapping):
         '''
 
         with closing(self._connection.cursor()) as cursor:
-            cursor.execute(f'DELETE FROM "{self._safe_table}"')
+            cursor.execute(f'DELETE FROM {self._table}')
 
     def postpone(self, key: str) -> None:
         '''Push back the expiration date of the given entry, if it exists.
         '''
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f'UPDATE "{self._safe_table}" SET expire={_unixepoch} + ? WHERE key=?',
+                f'UPDATE {self._table} SET expire={_unixepoch} + ? WHERE key=?',
                 (self._lifespan, key),
             )
 
@@ -573,6 +756,6 @@ class Connection(MutableMapping):
         '''
         with closing(self._connection.cursor()) as cursor:
             cursor.execute(
-                f'UPDATE "{self._safe_table}" SET expire={_unixepoch} + ?',
+                f'UPDATE {self._table} SET expire={_unixepoch} + ?',
                 (self._lifespan,),
             )

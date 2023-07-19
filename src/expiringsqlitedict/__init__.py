@@ -244,25 +244,25 @@ class ConnectionManager:
         assert not hasattr(self, '_exit_stack'), 'Can not be entered more than once at a time'
 
         with ExitStack() as exit_stack:
-            self._connection = exit_stack.enter_context(closing(sqlite3.connect(
+            connection = exit_stack.enter_context(closing(sqlite3.connect(
                 *self._args,
                 isolation_level=None,
                 **self._kwargs,
             )))
 
-            with closing(self._connection.cursor()) as cursor:
+            with closing(connection.cursor()) as cursor:
                 cursor.execute('PRAGMA journal_mode=WAL')
                 cursor.execute('PRAGMA synchronous=NORMAL')
 
             def optimize() -> None:
-                with closing(self._connection.cursor()) as cursor:
+                with closing(connection.cursor()) as cursor:
                     cursor.execute('PRAGMA analysis_limit=8192')
                     cursor.execute('PRAGMA optimize')
 
             exit_stack.callback(optimize)
 
             transaction_manager = TransactionManager(
-                connection=self._connection,
+                connection=connection,
                 serializer=self._serializer,
                 lifespan=self._lifespan,
                 transaction=self._transaction,
@@ -284,7 +284,7 @@ class ConnectionManager:
         try:
             return self._exit_stack.__exit__(type, value, traceback)
         finally:
-            del self._connection, self._exit_stack
+            del self._exit_stack
 
 class TransactionManager:
     """
@@ -358,7 +358,7 @@ class TransactionManager:
         try:
             return self._exit_stack.__exit__(type, value, traceback)
         finally:
-            del self._connection, self._exit_stack
+            del self._exit_stack
 
 class Manager:
     """
@@ -424,7 +424,7 @@ class Manager:
         try:
             return self._exit_stack.__exit__(type, value, traceback)
         finally:
-            del self._connection_manager, self._exit_stack
+            del self._exit_stack
 
 def Simple(
     *args,

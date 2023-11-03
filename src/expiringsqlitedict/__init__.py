@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import json
-from re import DEBUG
 import sqlite3
 from sqlite3 import sqlite_version_info
 from contextlib import ExitStack, closing, contextmanager
@@ -100,7 +99,7 @@ class _Keys(Reversible, Iterable[str]):
     def __init__(
         self,
         connection: sqlite3.Connection,
-        table: str,
+        table: Union[str, Identifier],
         order: Order,
     ) -> None:
 
@@ -132,7 +131,7 @@ class _Values(Reversible, Iterable[Any]):
     def __init__(
         self,
         connection: sqlite3.Connection,
-        table: str,
+        table: Union[str, Identifier],
         serializer: Any,
         order: Order,
     ) -> None:
@@ -166,7 +165,7 @@ class _Items(Reversible, Iterable[Tuple[str, Any]]):
     def __init__(
         self,
         connection: sqlite3.Connection,
-        table: str,
+        table: Union[str, Identifier],
         serializer: Any,
         order: Order,
     ) -> None:

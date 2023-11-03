@@ -1,7 +1,7 @@
 [project]
 name = 'expiringsqlitedict'
 description = 'Persistent compressed expiring dict in Python, backed up by sqlite3 and json'
-version = '7.0.1'
+version = '7.0.2'
 readme = 'README.md'
 requires-python = '>= 3.6, < 4'
 license = { text = 'MPL 2.0' }
@@ -16,6 +16,7 @@ classifiers = [
     'Programming Language :: Python :: 3.9',
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
     'Topic :: Database :: Front-Ends',
     'Topic :: Software Development :: Libraries :: Python Modules',
     'Topic :: Software Development :: Libraries',

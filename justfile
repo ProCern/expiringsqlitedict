@@ -58,7 +58,7 @@ _run-test $container $setup="":
 test-python version="latest": (_run-test ("python:" + version))
 
 # Test all supported python versions
-python-tests: (test-python "3.6") (test-python "3.7") (test-python "3.8") (test-python "3.9") (test-python "3.10") (test-python "3.11")
+python-tests: (test-python "3.6") (test-python "3.7") (test-python "3.8") (test-python "3.9") (test-python "3.10") (test-python "3.11") (test-python "3.12")
 
 # Test a particular centos version
 test-centos version="latest": (_run-test ("centos:" + version) yum-setup)
@@ -92,7 +92,7 @@ _test-dnf image="fedora:latest": (_run-test image dnf-setup)
 test-fedora version="latest": (_test-dnf ("fedora:" + version))
 
 # Test all supported fedora versions
-fedora-tests: (test-fedora "36") (test-fedora "37") (test-fedora "38")
+fedora-tests: (test-fedora "36") (test-fedora "37") (test-fedora "38") (test-fedora "39")
 
 # Test a particular RHEL version
 test-rhel version="ubi9": (_test-dnf ("redhat/" + version))

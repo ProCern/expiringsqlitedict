@@ -1,7 +1,7 @@
 [project]
 name = 'expiringsqlitedict'
 description = 'Persistent compressed expiring dict in Python, backed up by sqlite3 and json'
-version = '7.0.2'
+version = '7.0.3'
 readme = 'README.md'
 requires-python = '>= 3.6, < 4'
 license = { text = 'MPL 2.0' }
@@ -24,10 +24,10 @@ classifiers = [
 
 [[project.authors]]
 name = "Taylor C. Richberger"
-email = "tcr@absolute-performance.com"
+email = "taylor.richberger@procern.com"
 
 [project.urls]
-repository  = 'https://github.com/absperf/expiringsqlitedict'
+repository  = 'https://github.com/ProCern/expiringsqlitedict'
 documentation = 'https://expiringsqlitedict.readthedocs.io/'
 
 [build-system]

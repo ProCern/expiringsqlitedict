@@ -1,7 +1,7 @@
 [project]
 name = 'expiringsqlitedict'
 description = 'Persistent compressed expiring dict in Python, backed up by sqlite3 and json'
-version = '7.0.3'
+version = '7.0.4'
 readme = 'README.md'
 requires-python = '>= 3.6, < 4'
 license = { text = 'MPL 2.0' }

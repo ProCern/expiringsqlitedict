@@ -6,7 +6,7 @@ from sqlite3 import sqlite_version_info
 from contextlib import ExitStack, closing, contextmanager
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Generator, Iterable, Iterator, Optional, Reversible, Tuple, Type, Union, MutableMapping
+from typing import Any, Generator, ItemsView, Iterator, KeysView, Optional, Reversible, Tuple, Type, Union, MutableMapping, ValuesView
 from weakref import finalize
 from enum import unique, Enum
 
@@ -89,7 +89,7 @@ def _transaction(
         with closing(connection.cursor()) as cursor:
             cursor.execute('COMMIT')
 
-class _Keys(Reversible, Iterable[str]):
+class _Keys(Reversible, KeysView[str]):
     __slots__ = (
         '_connection',
         '_table',
@@ -114,13 +114,30 @@ class _Keys(Reversible, Iterable[str]):
             ):
                 yield row[0]
 
+    def __contains__(self, obj: object) -> bool:
+        if isinstance(obj, str):
+            with closing(self._connection.cursor()) as cursor:
+                for row in cursor.execute(
+                    f'SELECT 1 FROM {self._table} WHERE key = ?',
+                    (obj,),
+                ):
+                    return True
+
+        return False
+
+    def __len__(self) -> int:
+        with closing(self._connection.cursor()) as cursor:
+            return cursor.execute(f'SELECT COUNT(*) FROM {self._table}').fetchone()[0]
+
+        assert False
+
     def __iter__(self) -> Iterator[str]:
         return self._iterator('ASC')
 
     def __reversed__(self) -> Iterator[str]:
         return self._iterator('DESC')
 
-class _Values(Reversible, Iterable[Any]):
+class _Values(Reversible, ValuesView[Any]):
     __slots__ = (
         '_connection',
         '_table',
@@ -148,13 +165,32 @@ class _Values(Reversible, Iterable[Any]):
             ):
                 yield self._serializer.loads(row[0])
 
+    def __contains__(self, obj: object) -> bool:
+        try:
+            serialized = self._serializer.dumps(obj)
+        except Exception:
+            return False
+        if isinstance(obj, str):
+            with closing(self._connection.cursor()) as cursor:
+                for row in cursor.execute(
+                    f'SELECT 1 FROM {self._table} WHERE value = ?',
+                    (serialized,),
+                ):
+                    return True
+
+        return False
+
+    def __len__(self) -> int:
+        with closing(self._connection.cursor()) as cursor:
+            return cursor.execute(f'SELECT COUNT(*) FROM {self._table}').fetchone()[0]
+
     def __iter__(self) -> Iterator[Any]:
         return self._iterator('ASC')
 
     def __reversed__(self) -> Iterator[Any]:
         return self._iterator('DESC')
 
-class _Items(Reversible, Iterable[Tuple[str, Any]]):
+class _Items(Reversible, ItemsView[str, Any]):
     __slots__ = (
         '_connection',
         '_table',
@@ -182,6 +218,29 @@ class _Items(Reversible, Iterable[Tuple[str, Any]]):
             '''):
                 yield row[0], self._serializer.loads(row[1])
 
+    def __len__(self) -> int:
+        with closing(self._connection.cursor()) as cursor:
+            return cursor.execute(f'SELECT COUNT(*) FROM {self._table}').fetchone()[0]
+
+    def __contains__(self, obj: object) -> bool:
+        key: Any
+        value: Any
+        try:
+            key, value = obj # type: ignore
+            if not isinstance(key, str):
+                return False
+            serialized = self._serializer.dumps(value)
+        except Exception:
+            return False
+
+        if isinstance(obj, str):
+            with closing(self._connection.cursor()) as cursor:
+                for row in cursor.execute(
+                    f'SELECT 1 FROM {self._table} WHERE key = ? AND value = ?',
+                    (key, serialized),
+                ):
+                    return True
+        return False
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
         return self._iterator('ASC')
 
@@ -279,7 +338,7 @@ class ConnectionManager:
         type: Optional[Type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
-    ) -> bool:
+    ) -> Optional[bool]:
         try:
             return self._exit_stack.__exit__(type, value, traceback)
         finally:
@@ -353,7 +412,7 @@ class TransactionManager:
         type: Optional[Type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
-    ) -> bool:
+    ) -> Optional[bool]:
         try:
             return self._exit_stack.__exit__(type, value, traceback)
         finally:
@@ -419,7 +478,7 @@ class Manager:
         type: Optional[Type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
-    ) -> bool:
+    ) -> Optional[bool]:
         try:
             return self._exit_stack.__exit__(type, value, traceback)
         finally:
@@ -440,6 +499,8 @@ def Simple(
     d.connection.commit() and d.connection.rollback() appropriately.
     """
 
+    # Needed until we drop Python 3.6 and 3.7 support so we have access to Literal.  This will happen in July.
+    assert isolation_level is None or isolation_level == 'DEFERRED' or isolation_level == 'EXCLUSIVE' or isolation_level == 'IMMEDIATE'
     db = sqlite3.connect(*args, isolation_level=isolation_level, **kwargs)
     with closing(db.cursor()) as cursor:
         cursor.execute('PRAGMA journal_mode=WAL')
@@ -669,9 +730,12 @@ class Connection(MutableMapping[str, Any]):
             order=order,
         )
 
-    def __contains__(self, key: str) -> bool:
+    def __contains__(self, key: object) -> bool:
         '''Check if the table contains the given key.
         '''
+
+        if not isinstance(key, str):
+            return False
 
         with closing(self._connection.cursor()) as cursor:
             for _ in cursor.execute(

@@ -70,7 +70,7 @@ centos-tests: (test-centos "7")
 test-alpine version="latest": (_run-test ("alpine:" + version) apk-setup)
 
 # Test all supported alpine versions
-alpine-tests: (test-alpine "3.15") (test-alpine "3.16") (test-alpine "3.17") (test-alpine "3.18")
+alpine-tests: (test-alpine "3.16") (test-alpine "3.17") (test-alpine "3.18") (test-alpine "3.19")
 
 _test-apt image="debian:latest": (_run-test image apt-setup)
 
@@ -92,7 +92,7 @@ _test-dnf image="fedora:latest": (_run-test image dnf-setup)
 test-fedora version="latest": (_test-dnf ("fedora:" + version))
 
 # Test all supported fedora versions
-fedora-tests: (test-fedora "36") (test-fedora "37") (test-fedora "38") (test-fedora "39")
+fedora-tests: (test-fedora "38") (test-fedora "39") (test-fedora "40")
 
 # Test a particular RHEL version
 test-rhel version="ubi9": (_test-dnf ("redhat/" + version))

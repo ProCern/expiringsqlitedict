@@ -78,9 +78,9 @@ run:
 just test
 ```
 
-This will run all tests against all supported versions of Python (and 3.6), as
-well as all supported versions of Alpine, CentOS, Debian, Fedora, and Ubuntu
-Linux.
+This will run all tests against all supported versions of Python (and 3.6, for
+CentOS 7 support), as well as all supported versions of Alpine, CentOS, Debian,
+Fedora, and Ubuntu Linux.
 
 ## Documentation
 
